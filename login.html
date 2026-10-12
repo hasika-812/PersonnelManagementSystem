@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Personnel Management System</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #eef2f8;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-box {
+            background: white;
+            width: 100%;
+            max-width: 420px;
+            padding: 36px 32px;
+            border-radius: 14px;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #193b63;
+            text-align: center;
+            font-size: 22px;
+            margin: 0 0 6px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #687386;
+            margin: 0 0 28px;
+            font-size: 14px;
+        }
+
+        label {
+            display: block;
+            margin: 14px 0 6px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #263247;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccd3df;
+            border-radius: 6px;
+            font-size: 15px;
+            transition: border-color 0.15s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #245a91;
+            box-shadow: 0 0 0 3px rgba(36,90,145,0.12);
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 13px;
+            margin-top: 22px;
+            background: #245a91;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        button[type="submit"]:hover { background: #193b63; }
+        button[type="submit"]:disabled {
+            background: #9ab0c9;
+            cursor: not-allowed;
+        }
+
+        #message {
+            color: #c0392b;
+            text-align: center;
+            font-size: 14px;
+            margin-top: 12px;
+            min-height: 20px;
+        }
+
+        .info-box {
+            background: #eef2f8;
+            padding: 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+            margin-top: 22px;
+            color: #445;
+        }
+
+        .info-box strong { color: #193b63; }
+    </style>
+</head>
+
+<body>
+    <div class="login-box">
+        <h1>Personnel Management System</h1>
+        <p class="subtitle">Sign in to your account</p>
+
+        <form id="loginForm" novalidate>
+            <label for="email">Email Address</label>
+            <input
+                type="email"
+                id="email"
+                placeholder="Enter your email"
+                required
+                autocomplete="email"
+            >
+
+            <label for="password">Password</label>
+            <input
+                type="password"
+                id="password"
+                placeholder="Enter your password"
+                required
+                autocomplete="current-password"
+            >
+
+            <button type="submit" id="loginBtn">Sign In</button>
+        </form>
+
+        <p id="message" role="alert"></p>
+
+        <div class="info-box">
+            <strong>Admin Login</strong><br>
+            Email: admin@pms.local<br>
+            Password: <em>(set during setup)</em><br><br>
+            <strong>Employee Login</strong><br>
+            Email: <em>employee's email address</em><br>
+            Password: <em>(set by admin when creating the account)</em>
+        </div>
+    </div>
+
+    <!-- Supabase JS SDK (loaded from CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script>
+        /* --------------------------------------------------------
+           IMPORTANT: Replace these two values with your project's
+           actual URL and anon key from Supabase → Settings → API
+           -------------------------------------------------------- */
+        const SUPABASE_URL = "YOUR_SUPABASE_URL";
+        const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+        if (
+            SUPABASE_URL === "YOUR_SUPABASE_URL" ||
+            SUPABASE_KEY === "YOUR_SUPABASE_ANON_KEY"
+        ) {
+            document.getElementById("message").textContent =
+                "⚠ Supabase is not configured. Open login.html and script.js, " +
+                "then replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY. " +
+                "See SETUP.md for instructions.";
+        }
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        /* If already logged in, redirect immediately */
+        (async () => {
+            const { data: { session } } = await db.auth.getSession();
+            if (session) window.location.replace("index.html");
+        })();
+
+        /* ---- Login form ---- */
+        const loginForm = document.getElementById("loginForm");
+        const loginBtn  = document.getElementById("loginBtn");
+        const msgEl     = document.getElementById("message");
+
+        loginForm.addEventListener("submit", async function (e) {
+            e.preventDefault();
+            msgEl.textContent = "";
+
+            const email    = document.getElementById("email").value.trim().toLowerCase();
+            const password = document.getElementById("password").value;
+
+            if (!email || !password) {
+                msgEl.textContent = "Please enter your email and password.";
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = "Signing in…";
+
+            try {
+                const { data, error } = await db.auth.signInWithPassword({
+                    email,
+                    password
+                });
+
+                if (error) {
+                    if (
+                        error.message?.toLowerCase().includes("invalid") ||
+                        error.message?.toLowerCase().includes("credentials")
+                    ) {
+                        msgEl.textContent =
+                            "Incorrect email or password. Please try again.";
+                    } else {
+                        msgEl.textContent = error.message;
+                    }
+                    return;
+                }
+
+                /* Successful login — redirect to main app */
+                window.location.replace("index.html");
+
+            } catch (err) {
+                msgEl.textContent =
+                    "Login failed. Check your internet connection.";
+                console.error("Login error:", err);
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = "Sign In";
+            }
+        });
+    </script>
+</body>
+</html>

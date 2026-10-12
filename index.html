@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personnel Management System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Personnel Management System</h1>
+    <p id="headerSubtitle">Employee Management Dashboard</p>
+    <!-- Logout button injected here by JS -->
+</header>
+
+<!-- Admin navigation only -->
+<nav id="adminNav" style="display:none;">
+    <a href="#dashboard">Dashboard</a>
+    <a href="#addEmployee">Add Employee</a>
+    <a href="#employeeRecords">Employee Records</a>
+    <a href="#attendance">Attendance</a>
+    <a href="#leaveManagement">Leave Management</a>
+</nav>
+
+<main>
+
+    <!-- ==================== ADMIN DASHBOARD ==================== -->
+    <section id="dashboard" style="display:none;">
+        <h2>Dashboard</h2>
+        <p>Welcome, Admin. Use the navigation above to manage the system.</p>
+        <div id="dashboardStats" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;">
+            <div class="stat-card">
+                <div class="stat-number" id="statTotalEmployees">—</div>
+                <div class="stat-label">Total Employees</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="statTodayPresent">—</div>
+                <div class="stat-label">Present Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="statPendingLeaves">—</div>
+                <div class="stat-label">Pending Leave Requests</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== ADD EMPLOYEE ==================== -->
+    <section id="addEmployee" style="display:none;">
+        <h2>Add New Employee</h2>
+
+        <form id="employeeForm">
+            <label for="empId">Employee ID</label>
+            <input type="text" id="empId" placeholder="e.g. EMP001" required>
+
+            <label for="empName">Full Name</label>
+            <input type="text" id="empName" placeholder="Full name" required>
+
+            <label for="empEmail">Email Address</label>
+            <input type="email" id="empEmail" placeholder="employee@company.com" required>
+
+            <label for="empDepartment">Department</label>
+            <select id="empDepartment" required>
+                <option value="">Select Department</option>
+                <option>Development</option>
+                <option>Testing</option>
+                <option>Human Resources</option>
+                <option>Finance</option>
+                <option>Marketing</option>
+            </select>
+
+            <label for="empDesignation">Designation</label>
+            <input type="text" id="empDesignation" placeholder="e.g. Software Engineer" required>
+
+            <label for="empSalary">Monthly Salary (₹)</label>
+            <input type="number" id="empSalary" min="0" placeholder="e.g. 50000" required>
+
+            <label for="empPassword">Initial Password</label>
+            <input type="password" id="empPassword" placeholder="Set a password for this employee" required minlength="8">
+
+            <button type="submit" id="addEmpBtn">Add Employee</button>
+        </form>
+        <p id="addEmployeeMessage" style="color:#c0392b;margin-top:10px;"></p>
+    </section>
+
+    <!-- ==================== EMPLOYEE RECORDS ==================== -->
+    <section id="employeeRecords" style="display:none;">
+        <h2>Employee Records</h2>
+
+        <input
+            type="search"
+            id="searchEmployee"
+            placeholder="Search by ID, name, email or department..."
+        >
+
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Employee ID</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Department</th>
+                        <th>Designation</th>
+                        <th>Salary</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="employeeList"></tbody>
+            </table>
+        </div>
+
+        <p id="emptyMessage">No employees added yet.</p>
+    </section>
+
+    <!-- ==================== EDIT EMPLOYEE MODAL ==================== -->
+    <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#00000060;z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:white;padding:30px;border-radius:12px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto;">
+            <h3 style="color:#193b63;margin-top:0;">Edit Employee</h3>
+            <form id="editEmployeeForm">
+                <input type="hidden" id="editEmpDbId">
+                <label for="editEmpId">Employee ID</label>
+                <input type="text" id="editEmpId" required>
+
+                <label for="editEmpName">Full Name</label>
+                <input type="text" id="editEmpName" required>
+
+                <label for="editEmpEmail">Email Address</label>
+                <input type="email" id="editEmpEmail" required>
+
+                <label for="editEmpDepartment">Department</label>
+                <select id="editEmpDepartment" required>
+                    <option value="">Select Department</option>
+                    <option>Development</option>
+                    <option>Testing</option>
+                    <option>Human Resources</option>
+                    <option>Finance</option>
+                    <option>Marketing</option>
+                </select>
+
+                <label for="editEmpDesignation">Designation</label>
+                <input type="text" id="editEmpDesignation" required>
+
+                <label for="editEmpSalary">Monthly Salary (₹)</label>
+                <input type="number" id="editEmpSalary" min="0" required>
+
+                <div style="display:flex;gap:10px;margin-top:12px;">
+                    <button type="submit" id="saveEditBtn">Save Changes</button>
+                    <button type="button" onclick="closeEditModal()" style="background:#888;">Cancel</button>
+                </div>
+            </form>
+            <p id="editMessage" style="color:#c0392b;margin-top:10px;"></p>
+        </div>
+    </div>
+
+    <!-- ==================== ATTENDANCE MANAGEMENT ==================== -->
+    <section id="attendance" style="display:none;">
+        <h2>Attendance Management</h2>
+
+        <form id="attendanceForm">
+            <label for="attendanceEmployee">Employee</label>
+            <select id="attendanceEmployee" required>
+                <option value="">Select Employee</option>
+            </select>
+
+            <label for="attendanceDate">Date</label>
+            <input type="date" id="attendanceDate" required>
+
+            <label for="attendanceStatus">Attendance Status</label>
+            <select id="attendanceStatus" required>
+                <option value="Present">Present</option>
+                <option value="Absent">Absent</option>
+                <option value="Leave">Leave</option>
+            </select>
+
+            <button type="submit" id="saveAttendanceBtn">Save Attendance</button>
+        </form>
+        <p id="attendanceFormMessage" style="color:#c0392b;margin-top:6px;"></p>
+
+        <h3>Attendance Records</h3>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <input type="text" id="filterAttEmployee" placeholder="Filter by employee ID..." style="padding:8px;border:1px solid #ccd3df;border-radius:5px;">
+            <input type="date" id="filterAttDate" style="padding:8px;border:1px solid #ccd3df;border-radius:5px;">
+            <button type="button" onclick="applyAttendanceFilter()" style="padding:8px 16px;">Filter</button>
+            <button type="button" onclick="clearAttendanceFilter()" style="padding:8px 16px;background:#888;">Clear</button>
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Employee ID</th>
+                        <th>Name</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="attendanceList"></tbody>
+            </table>
+        </div>
+
+        <p id="attendanceMessage">No attendance records yet.</p>
+    </section>
+
+    <!-- ==================== LEAVE MANAGEMENT (ADMIN) ==================== -->
+    <section id="leaveManagement" style="display:none;">
+        <h2>Leave Management</h2>
+        <h3 id="leaveRequestsHeading">All Employee Leave Requests</h3>
+
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Employee ID</th>
+                        <th>Name</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="leaveList"></tbody>
+            </table>
+        </div>
+
+        <p id="leaveMessage">No leave requests yet.</p>
+    </section>
+
+    <!-- ==================== EMPLOYEE DASHBOARD ==================== -->
+    <section id="employeeDashboard" style="display:none;">
+        <h2>My Dashboard</h2>
+
+        <h3>My Profile</h3>
+        <div id="myProfile"></div>
+
+        <h3>My Attendance Summary</h3>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;">
+            <div class="stat-card">
+                <div class="stat-number" id="myPresentDays">0</div>
+                <div class="stat-label">Present Days</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="myLeaveDays">0</div>
+                <div class="stat-label">Leaves Taken</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="myLeaveBalance">12</div>
+                <div class="stat-label">Leave Balance</div>
+            </div>
+        </div>
+
+        <h3>My Attendance Records</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="myAttendanceList"></tbody>
+            </table>
+        </div>
+        <p id="myAttendanceMessage" style="color:#777;">No attendance records yet.</p>
+
+        <!-- EMPLOYEE LEAVE SECTION -->
+        <div id="employeeLeaveSection">
+            <h3>Apply for Leave</h3>
+
+            <form id="leaveForm">
+                <label for="leaveStart">Start Date</label>
+                <input type="date" id="leaveStart" required>
+
+                <label for="leaveEnd">End Date</label>
+                <input type="date" id="leaveEnd" required>
+
+                <label for="leaveReason">Reason for Leave</label>
+                <textarea
+                    id="leaveReason"
+                    rows="3"
+                    placeholder="Enter your reason for leave"
+                    required
+                    style="width:100%;padding:10px;border:1px solid #ccd3df;border-radius:5px;font-size:15px;box-sizing:border-box;resize:vertical;"
+                ></textarea>
+
+                <button type="submit" id="submitLeaveBtn">Submit Leave Request</button>
+            </form>
+            <p id="leaveFormMessage" style="color:#c0392b;margin-top:6px;"></p>
+
+            <h3>My Leave Requests</h3>
+
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Start Date</th>
+                            <th>End Date</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="myLeaveList"></tbody>
+                </table>
+            </div>
+
+            <p id="myLeaveMessage" style="color:#777;">No leave requests yet.</p>
+        </div>
+    </section>
+
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#ffffffcc;z-index:2000;align-items:center;justify-content:center;flex-direction:column;">
+        <div class="spinner"></div>
+        <div style="font-size:16px;color:#245a91;font-weight:bold;">Loading…</div>
+    </div>
+
+    <!-- Toast notification -->
+    <div id="toast"></div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js"></script>
+</body>
+</html>
