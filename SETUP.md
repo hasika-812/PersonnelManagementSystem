@@ -1,243 +1,374 @@
-# Personnel Management System — Setup Guide
+# Personnel Management System — Setup Guide (v2)
 
-## What Was Built
+## Overview
 
-A full-stack Personnel Management System with:
-- **Supabase** (PostgreSQL + Auth) as the backend
-- Vanilla HTML/CSS/JavaScript frontend
+This is a full-stack Personnel Management System built with:
+- **Supabase** — PostgreSQL database, Auth, and Row Level Security
+- Vanilla HTML / CSS / JavaScript frontend (no framework, no build step)
 - Role-based access: Admin and Employee
-- Persistent database storage (survives logout, refresh, device change)
-- Real authentication (email + password via Supabase Auth)
-- Row Level Security — employees can only see their own data
+
+All security is enforced at the database level using Row Level Security (RLS)
+policies, not just in the frontend JavaScript.
 
 ---
 
-## Project Files
+## Files in This Project
 
 | File | Purpose |
 |---|---|
-| `login.html` | Login page (Supabase Auth) |
-| `index.html` | Main app (admin + employee views) |
-| `style.css` | All styling |
-| `script.js` | All frontend logic + Supabase API calls |
-| `supabase_schema.sql` | Database schema — run once in Supabase SQL Editor |
+| `login.html` | Sign-in page for all users |
+| `register.html` | Employee first-login / account activation page |
+| `index.html` | Main app (admin dashboard + employee dashboard) |
+| `style.css` | All styles |
+| `script.js` | All frontend logic and Supabase API calls |
+| `supabase_schema.sql` | Full database schema — run once in Supabase |
 | `SETUP.md` | This file |
+
+> **Important:** You must add your Supabase URL and anon key to THREE files:
+> `login.html`, `register.html`, and `script.js`.
+> All three need the same values.
 
 ---
 
 ## Step 1 — Create a Supabase Project
 
-1. Go to [https://supabase.com](https://supabase.com) and sign up for a free account.
-2. Click **New Project**.
-3. Choose a name (e.g. `PersonnelManagementSystem`), set a database password (save it somewhere), pick the closest region.
-4. Wait about 1–2 minutes for the project to initialize.
+1. Go to [https://supabase.com](https://supabase.com) and sign in or create a free account.
+2. Click **New project**.
+3. Fill in a project name (e.g. `PersonnelManagementSystem`), set a database password
+   (save it — you won't need it often but keep it safe), and pick a region.
+4. Wait 1–2 minutes for the project to be ready.
 
 ---
 
-## Step 2 — Run the Database Schema
+## Step 2 — Disable Email Confirmation
+
+Do this **before** creating any users, including the admin.
+
+1. In your Supabase project, go to **Authentication → Settings**.
+2. Find **"Enable email confirmations"** and turn it **OFF**.
+3. Click **Save**.
+
+If you skip this step, every new user (including admin) will need to click a
+confirmation email before they can log in. For a college demo, turning this
+off makes the process much smoother.
+
+---
+
+## Step 3 — Run the Database Schema
 
 1. In your Supabase project, click **SQL Editor** in the left sidebar.
 2. Click **New query**.
-3. Open `supabase_schema.sql` from this folder and paste the entire contents into the SQL Editor.
-4. Click **Run** (or press Ctrl+Enter).
-5. You should see "Success. No rows returned." — that means it worked.
+3. Open `supabase_schema.sql` from this project folder.
+4. Select all the text and paste it into the SQL Editor.
+5. Click **Run** (or press Ctrl+Enter / Cmd+Enter).
+6. You should see **"Success. No rows returned."** for each statement.
 
-This creates four tables:
-- `profiles` — one row per user, stores their role (admin/employee)
-- `employees` — employee details (name, department, salary, etc.)
+This creates:
+- `profiles` — user role storage (admin / employee) with RLS
+- `employees` — employee details
 - `attendance` — daily attendance records
-- `leave_requests` — employee leave applications with Pending/Approved/Rejected status
+- `leave_requests` — leave applications with Pending/Approved/Rejected status
+- `get_my_role()` — a safe role-check helper function (avoids RLS recursion)
+- `handle_new_user()` — trigger that creates a default profile for each new Auth user
+- `claim_employee_account()` — RPC function used during employee first login
 
 ---
 
-## Step 3 — Get Your API Keys
+## Step 4 — Get Your API Keys
 
-1. In your Supabase project, go to **Settings → API** (in the left sidebar).
-2. Copy two values:
-   - **Project URL** — looks like `https://xyzxyzxyz.supabase.co`
-   - **anon/public key** — a long string starting with `eyJ...`
+1. In your Supabase project, go to **Settings → API**.
+2. Copy:
+   - **Project URL** — looks like `https://abcdefghij.supabase.co`
+   - **anon / public key** — a long string starting with `eyJ...`
 
-> ⚠️ Never share the `service_role` key. Only use the `anon` key in your frontend code.
+> ⚠️ Use ONLY the `anon` / `public` key in your frontend files.
+> Never put the `service_role` key in any browser file — it bypasses all security.
 
 ---
 
-## Step 4 — Add Keys to Your Code
+## Step 5 — Add Keys to Your Code
 
-Open **both** of these files and replace the two placeholder values:
+Open **each** of these three files and replace the two placeholder values:
 
-### `login.html` (near the bottom, inside `<script>`)
-
-```javascript
-const SUPABASE_URL = "https://your-project-id.supabase.co";
-const SUPABASE_KEY = "eyJhbGci...your-anon-key...";
+```
+login.html     (inside the <script> block near the bottom)
+register.html  (inside the <script> block near the bottom)
+script.js      (at the very top of the file)
 ```
 
-### `script.js` (at the very top)
+In all three files, replace:
 
 ```javascript
-const SUPABASE_URL = "https://your-project-id.supabase.co";
-const SUPABASE_KEY = "eyJhbGci...your-anon-key...";
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
 ```
 
-Make sure you replace both files. They both need the same values.
+with your actual values:
+
+```javascript
+const SUPABASE_URL = "https://abcdefghij.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+```
 
 ---
 
-## Step 5 — Create the Admin Account
+## Step 6 — Create the Admin Account
 
-1. In Supabase, go to **Authentication → Users** (left sidebar).
+### 6A — Create the Auth user
+
+1. In Supabase, go to **Authentication → Users**.
 2. Click **Add user**.
 3. Enter:
-   - **Email**: `admin@pms.local` (or any email you want)
-   - **Password**: choose a strong password (you'll use this to log in)
+   - Email: `admin@pms.local` (or any email you prefer)
+   - Password: choose a strong password and write it down
 4. Click **Create user**.
-5. The user is created. Now copy the **UUID** shown in the users list (the long `xxxxxxxx-xxxx-...` string in the ID column).
-6. Go back to **SQL Editor**, create a new query, and run:
+
+At this point, the `handle_new_user()` trigger fires automatically and creates
+a profile row with `role = 'employee'` (the safe default for every new user).
+
+### 6B — Promote the profile row to admin
+
+Go to **SQL Editor**, create a new query, and run:
 
 ```sql
 INSERT INTO public.profiles (id, role)
-VALUES ('PASTE-YOUR-UUID-HERE', 'admin')
+VALUES ('<paste-the-admin-UUID-here>', 'admin')
 ON CONFLICT (id) DO UPDATE SET role = 'admin';
 ```
 
-Replace `PASTE-YOUR-UUID-HERE` with the actual UUID. Now this account has admin access.
+Replace `<paste-the-admin-UUID-here>` with the UUID shown in the Users list
+(the long `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` string in the ID column).
+
+> ⚠️ You MUST use `ON CONFLICT (id) DO UPDATE SET role = 'admin'`.
+> Using `DO NOTHING` would silently keep the role as 'employee' because the
+> trigger already inserted that row. Your admin could never log in with the
+> correct role if you use `DO NOTHING`.
+
+### 6C — Verify
+
+Run this in the SQL Editor:
+
+```sql
+SELECT id, role FROM public.profiles WHERE role = 'admin';
+```
+
+You should see exactly one row. If the result is empty, the `DO UPDATE` step
+did not run correctly — check that you used the right UUID.
 
 ---
 
-## Step 6 — Open the App
+## Step 7 — Open the App and Test Admin Login
 
-Since this is a static HTML project, open it one of these ways:
+Open `login.html` in your browser.
 
-**Option A — Live Server (VS Code)**
-- Install the "Live Server" extension in VS Code.
+**Recommended: use Live Server in VS Code**
+- Install the "Live Server" extension.
 - Right-click `login.html` → Open with Live Server.
 - The app opens at `http://127.0.0.1:5500/login.html`.
 
-**Option B — Direct browser open**
-- Double-click `login.html` in File Explorer.
-- Note: Some browsers block `fetch()` on `file://` URLs. If login fails, use Live Server instead.
+Alternatively, double-click `login.html` in File Explorer.
+Note: Some browsers block network requests on `file://` URLs.
+If login fails immediately, switch to Live Server.
 
-**Option C — Deploy to Netlify / GitHub Pages (optional)**
-- Drag the entire project folder to [https://app.netlify.com/drop](https://app.netlify.com/drop) for a free live URL.
-
----
-
-## Step 7 — Test the App
-
-### Admin flow:
-1. Open `login.html`.
-2. Log in with the admin email + password you set.
-3. You should see the admin dashboard.
-4. Go to **Add Employee** and create an employee:
-   - Set an Employee ID (e.g. `EMP001`)
-   - Set their email (e.g. `john@company.com`)
-   - Set an initial password (at least 8 characters)
-5. Go to **Employee Records** to confirm the employee appears.
-6. Go to **Attendance** and mark attendance for that employee.
-7. Go to **Leave Management** to see/approve leave requests.
-
-### Employee flow:
-1. Open `login.html` in a different browser or incognito window.
-2. Log in with the employee's email and the password you set.
-3. You should see the employee dashboard with their profile.
-4. Their attendance summary should reflect the records entered by admin.
-5. Submit a leave request.
-6. Switch back to admin — the leave request should appear.
-7. Approve/reject it.
-8. Refresh the employee view — the status should update.
+Log in with the admin email and password you set in Step 6.
+You should see the admin dashboard with stat cards and navigation.
 
 ---
 
-## Architecture Explanation (for Viva)
+## Step 8 — Create Employee Accounts (via the App)
+
+The admin creates employee records. Employees activate their own accounts
+using a one-time invite token. This is secure because:
+
+- The admin never creates Auth users directly from their browser
+  (doing so via `signUp()` would silently sign the admin out).
+- Employees set their own passwords — the admin never knows them.
+- The invite token is single-use and stored in the database.
+
+### Admin steps:
+
+1. Log in as admin and go to **Add Employee**.
+2. Fill in the Employee ID, name, email, department, designation, and salary.
+3. Click **Add Employee**.
+4. A popup will appear with the invite details:
+   ```
+   Employee ID   : EMP001
+   Email         : john@company.com
+   Invite Token  : A3F9C2B1
+   ```
+5. Write these down or copy them — you will give them to the employee.
+
+### Employee steps:
+
+1. Open `register.html` in a browser (or go to the link you share with them).
+2. Enter:
+   - Employee ID (exactly as given by admin, e.g. `EMP001`)
+   - Email address (exactly as given by admin)
+   - Invite Token (the code from the popup)
+   - A new password (at least 8 characters)
+   - Confirm password
+3. Click **Activate Account**.
+4. If successful, they are redirected to login.
+
+The employee can now log in at `login.html` using their email and the
+password they just set.
+
+---
+
+## Step 9 — Full Workflow Test
+
+After setup, verify these scenarios manually:
+
+| # | Test | Expected Result |
+|---|---|---|
+| 1 | Admin logs in | Reaches admin dashboard |
+| 2 | Admin adds employee EMP001 | Invite token shown in popup |
+| 3 | Employee activates via register.html | "Account Activated" shown |
+| 4 | Employee logs in | Reaches employee dashboard with correct profile |
+| 5 | Employee submits leave request | Appears in admin Leave Management |
+| 6 | Admin approves leave | Employee sees "Approved" status after refresh |
+| 7 | Admin marks attendance | Employee sees it in their attendance table |
+| 8 | Employee logs out, logs back in | All data still visible (persists in DB) |
+| 9 | Employee tries to access index.html without logging in | Redirected to login.html |
+| 10 | Employee views only their own data | Cannot see other employees' records |
+
+---
+
+## Architecture (for Viva / Project Review)
 
 ```
-┌─────────────────────────────────────────────┐
-│              Browser (Client)               │
-│                                             │
-│  login.html ──────→ index.html              │
-│                         │                   │
-│                    script.js                │
-│                         │                   │
-│          Supabase JS SDK (@supabase/supabase-js)
-└─────────────────────────────────────────────┘
-                          │
-                    HTTPS / REST
-                          │
-┌─────────────────────────────────────────────┐
-│              Supabase (Cloud)               │
-│                                             │
-│  ┌──────────────┐   ┌─────────────────────┐ │
-│  │  Auth Service│   │   PostgreSQL DB     │ │
-│  │  (JWT tokens)│   │                     │ │
-│  └──────────────┘   │  profiles           │ │
-│                     │  employees          │ │
-│                     │  attendance         │ │
-│                     │  leave_requests     │ │
-│                     └─────────────────────┘ │
-│                                             │
-│  Row Level Security (RLS) enforced on all   │
-│  tables — employees cannot access other     │
-│  employees' data even if they try directly  │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│           Browser (Client Side)          │
+│                                          │
+│  login.html      register.html           │
+│       │               │                  │
+│       └───────┬────────┘                 │
+│               ▼                          │
+│          index.html + script.js          │
+│          Supabase JS SDK (@v2)           │
+└──────────────────────────────────────────┘
+                 │ HTTPS
+                 ▼
+┌──────────────────────────────────────────┐
+│             Supabase (Cloud)             │
+│                                          │
+│  ┌─────────────┐  ┌──────────────────┐  │
+│  │  Auth       │  │  PostgreSQL DB   │  │
+│  │  (JWT)      │  │                  │  │
+│  └─────────────┘  │  profiles        │  │
+│                   │  employees       │  │
+│                   │  attendance      │  │
+│                   │  leave_requests  │  │
+│                   └──────────────────┘  │
+│                                          │
+│  Row Level Security on every table       │
+│  get_my_role() avoids RLS recursion      │
+└──────────────────────────────────────────┘
 ```
 
-### Key concepts for your viva:
+### Key concepts explained simply:
 
 **Why Supabase?**
-It provides a full PostgreSQL database and authentication as a managed cloud service. We don't need to run our own server — the frontend talks directly to Supabase over HTTPS using their JavaScript SDK.
+It gives us a real PostgreSQL database and authentication without needing to
+run our own server. The frontend talks to Supabase directly over HTTPS.
 
 **What is Row Level Security (RLS)?**
-It's a PostgreSQL feature that adds security rules at the database level. Even if someone bypasses the frontend and sends a direct API request, the database itself will block them from seeing records they don't own. For example, an employee trying to query another employee's leave requests will get an empty result.
+RLS rules are enforced inside the database itself. Even if someone bypasses
+the frontend and sends a direct API request, the database will refuse to
+return rows they are not allowed to see.
 
-**Why not localStorage?**
-localStorage is stored in the browser on one device. If admin adds an employee on their computer and that employee tries to log in from their own computer, they would find no data. It also has zero security — anyone with DevTools access can read and modify everything.
+**Why `get_my_role()` instead of querying `profiles` directly in policies?**
+RLS policies on the `profiles` table cannot safely query `profiles` again
+inside themselves — PostgreSQL would recurse infinitely. The `get_my_role()`
+function uses `SECURITY DEFINER` to bypass RLS and read the role safely
+without recursion.
 
-**Authentication flow:**
-1. User enters email + password in `login.html`.
-2. Supabase verifies credentials and returns a JWT token.
-3. The token is stored automatically by the Supabase SDK.
-4. Every subsequent API call includes the token in the Authorization header.
-5. Supabase checks the token and applies RLS policies accordingly.
+**Why the invite-token flow instead of admin calling `signUp()`?**
+Calling `auth.signUp()` from the admin's browser session creates a new
+session for the new employee, which silently replaces the admin's session.
+After that, all subsequent database calls run as the employee (who has no
+admin permissions) and fail. The invite-token approach avoids this entirely:
+the employee activates their own account on their own device.
+
+**What is `ON CONFLICT (id) DO UPDATE` vs `DO NOTHING`?**
+The `handle_new_user()` trigger inserts every new Auth user with
+`role = 'employee'`. When you later run the admin promotion SQL,
+`DO NOTHING` would see the existing row and skip the update — leaving the
+admin with an `employee` role and unable to access the admin dashboard.
+`DO UPDATE SET role = 'admin'` correctly overrides the trigger's default.
 
 ---
 
-## Environment Variables
+## Required Configuration (3 files, same 2 values)
 
-| Variable | Where to find it | Used in |
-|---|---|---|
-| `SUPABASE_URL` | Supabase → Settings → API → Project URL | `login.html`, `script.js` |
-| `SUPABASE_KEY` | Supabase → Settings → API → anon/public | `login.html`, `script.js` |
+| Variable | Where to find it |
+|---|---|
+| `SUPABASE_URL` | Supabase → Settings → API → Project URL |
+| `SUPABASE_KEY` | Supabase → Settings → API → anon / public key |
 
-> These are safe to include in frontend code. The `anon` key is publicly accessible by design. Security is enforced by RLS policies, not by keeping the key secret.
+Files that need these values: `login.html`, `register.html`, `script.js`
 
----
-
-## Known Limitations
-
-1. **Email confirmation**: By default Supabase requires users to confirm their email before logging in. For a college demo, disable this under **Authentication → Settings → Email Confirmations → Disable**.
-2. **Admin creates employee Auth accounts**: When admin adds an employee, `signUp()` is called which creates the Auth user. This works but the employee will briefly get a "New sign-up" confirmation email if email confirmation is enabled (see point 1).
-3. **Password reset**: No UI for employees to change their password — not in scope for this version.
-4. **One admin only**: The system is designed for one admin. Multiple admins would work (just mark multiple profiles as `role = 'admin'`) but there's no UI to manage admin accounts.
-5. **File-based serving**: `fetch()` calls may fail on some browsers when opened as `file://`. Use Live Server or deploy to Netlify.
+The `anon` key is safe to include in frontend code.
+Security is enforced by RLS policies, not by keeping this key secret.
 
 ---
 
 ## Troubleshooting
 
-**"Supabase Not Configured" screen on index.html or login.html**
-→ You haven't replaced `YOUR_SUPABASE_URL` and `YOUR_SUPABASE_ANON_KEY` in both files.
+**"Supabase Not Configured" screen**
+→ You have not replaced the placeholder URL/key in one or more files.
+   Check all three: `login.html`, `register.html`, `script.js`.
 
-**Login says "Incorrect email or password"**
-→ Double-check you created the admin user in Supabase → Authentication → Users and set the correct email/password.
+**Admin logs in but is sent back to `login.html` in a loop**
+→ The profile row was not promoted to admin. Run the SQL in Step 6B.
+   Make sure you used `DO UPDATE SET role = 'admin'`, not `DO NOTHING`.
 
-**Admin logs in but sees "Could not load your profile"**
-→ You forgot to run the SQL INSERT for the profiles table (Step 5 above).
+**"Could not load your profile" error on index.html**
+→ The profiles row is missing or has the wrong `id`.
+   Run `SELECT * FROM public.profiles;` in SQL Editor to inspect.
 
-**Employee can't log in**
-→ Make sure you disabled email confirmation in Supabase (Authentication → Settings). If email confirmation is enabled, the employee must click the confirmation link in their email first.
+**Employee activation says "Employee ID not found"**
+→ The Employee ID the employee entered does not exactly match what
+   admin entered. Check for extra spaces or case differences.
+   Employee ID lookup is case-sensitive — enter it exactly as shown.
 
-**"Failed to load employees" toast appears**
-→ Check that you ran the full `supabase_schema.sql` correctly. Open Supabase → Table Editor and verify that the `employees`, `attendance`, `leave_requests`, and `profiles` tables exist.
+**Employee activation says "Account has already been claimed"**
+→ The account was already activated. The employee should use `login.html`.
 
-**Attendance duplicate error**
-→ This is intentional. Each employee can only have one attendance record per date.
+**Employee activation says "Invalid invite token"**
+→ The token was mistyped. Admin can click "Show Invite" in Employee
+   Records to view the token again (if not yet claimed).
+
+**Invite token not shown / lost**
+→ Admin goes to Employee Records and clicks "Show Invite" next to any
+   unclaimed account (shown with "Pending claim" badge).
+
+**Employee logs in but sees no profile data**
+→ The `claim_employee_account()` RPC did not link the `auth_user_id`
+   correctly. Check that `register.html` ran successfully without errors.
+
+**App works on Live Server but not on double-clicked `file://`**
+→ Some browsers block `fetch()` on file:// URLs.
+   Use Live Server, or deploy to Netlify (drag and drop the folder at
+   https://app.netlify.com/drop).
+
+---
+
+## Known Limitations
+
+1. **No password reset UI** — employees cannot change their password from
+   within the app. They would need to use Supabase's built-in password
+   reset email flow, which requires email confirmation to be enabled.
+
+2. **One admin only** — the system is designed for a single admin account.
+   Multiple admins can be added by running the SQL promotion command again,
+   but there is no in-app UI for this.
+
+3. **Invite token delivered manually** — in a real system this token would
+   be emailed automatically. Here the admin copies and pastes it.
+   This is intentional to keep the project simple.
+
+4. **Leave balance based on attendance status** — leave balance is
+   calculated from attendance records marked as "Leave" by admin,
+   not directly from approved leave requests. Both systems are
+   consistent as long as admin updates attendance when leave is approved.

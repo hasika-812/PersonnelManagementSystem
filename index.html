@@ -75,12 +75,16 @@
             <label for="empSalary">Monthly Salary (₹)</label>
             <input type="number" id="empSalary" min="0" placeholder="e.g. 50000" required>
 
-            <label for="empPassword">Initial Password</label>
-            <input type="password" id="empPassword" placeholder="Set a password for this employee" required minlength="8">
-
             <button type="submit" id="addEmpBtn">Add Employee</button>
         </form>
         <p id="addEmployeeMessage" style="color:#c0392b;margin-top:10px;"></p>
+        <div style="background:#eef2f8;border-radius:8px;padding:14px;margin-top:16px;font-size:13px;color:#445;max-width:600px;">
+            <strong>How employee accounts work:</strong> After you add an employee,
+            the system generates a one-time invite token. Share the Employee ID, email,
+            and invite token with the employee. They open
+            <a href="register.html" target="_blank">register.html</a>
+            to set their own password and activate their account.
+        </div>
     </section>
 
     <!-- ==================== EMPLOYEE RECORDS ==================== -->
@@ -103,6 +107,7 @@
                         <th>Department</th>
                         <th>Designation</th>
                         <th>Salary</th>
+                        <th>Account Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>

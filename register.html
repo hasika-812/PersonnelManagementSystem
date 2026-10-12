@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>First Login — Personnel Management System</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #eef2f8;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .box {
+            background: white;
+            width: 100%;
+            max-width: 440px;
+            padding: 36px 32px;
+            border-radius: 14px;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #193b63;
+            text-align: center;
+            font-size: 20px;
+            margin: 0 0 6px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #687386;
+            margin: 0 0 24px;
+            font-size: 14px;
+        }
+
+        label {
+            display: block;
+            margin: 14px 0 6px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #263247;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccd3df;
+            border-radius: 6px;
+            font-size: 15px;
+            transition: border-color 0.15s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #245a91;
+            box-shadow: 0 0 0 3px rgba(36,90,145,0.12);
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 13px;
+            margin-top: 22px;
+            background: #245a91;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        button[type="submit"]:hover    { background: #193b63; }
+        button[type="submit"]:disabled { background: #9ab0c9; cursor: not-allowed; }
+
+        #message {
+            color: #c0392b;
+            text-align: center;
+            font-size: 14px;
+            margin-top: 12px;
+            min-height: 20px;
+        }
+
+        #successBox {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        #successBox h2 { color: #287a52; }
+
+        .info-box {
+            background: #eef2f8;
+            padding: 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+            margin-top: 22px;
+            color: #445;
+        }
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 18px;
+            color: #245a91;
+            font-size: 14px;
+            text-decoration: none;
+        }
+
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <h1>Personnel Management System</h1>
+        <p class="subtitle">First Login — Activate Your Account</p>
+
+        <div id="successBox">
+            <h2>✓ Account Activated</h2>
+            <p>Your account is ready. You can now sign in.</p>
+            <a href="login.html" style="color:#245a91;font-weight:bold;">
+                Go to Login →
+            </a>
+        </div>
+
+        <form id="registerForm" novalidate>
+            <label for="empId">Employee ID</label>
+            <input
+                type="text"
+                id="empId"
+                placeholder="e.g. EMP001"
+                required
+                autocomplete="off"
+            >
+
+            <label for="email">Email Address</label>
+            <input
+                type="email"
+                id="email"
+                placeholder="Your work email address"
+                required
+                autocomplete="email"
+            >
+
+            <label for="inviteToken">Invite Token</label>
+            <input
+                type="text"
+                id="inviteToken"
+                placeholder="Token given to you by admin"
+                required
+                autocomplete="off"
+                style="font-family:monospace;letter-spacing:0.1em;"
+            >
+
+            <label for="password">New Password</label>
+            <input
+                type="password"
+                id="password"
+                placeholder="Minimum 8 characters"
+                required
+                minlength="8"
+                autocomplete="new-password"
+            >
+
+            <label for="confirmPassword">Confirm Password</label>
+            <input
+                type="password"
+                id="confirmPassword"
+                placeholder="Repeat your password"
+                required
+                minlength="8"
+                autocomplete="new-password"
+            >
+
+            <button type="submit" id="registerBtn">Activate Account</button>
+        </form>
+
+        <p id="message" role="alert"></p>
+
+        <div class="info-box">
+            Your Employee ID, email, and invite token were provided by your
+            administrator. If you did not receive them, please contact admin.
+        </div>
+
+        <a href="login.html" class="back-link">← Back to Login</a>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script>
+        /*
+         * Replace these two values with your Supabase project URL and anon key.
+         * They must match the values in login.html and script.js.
+         */
+        const SUPABASE_URL = "YOUR_SUPABASE_URL";
+        const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+        if (
+            SUPABASE_URL === "YOUR_SUPABASE_URL" ||
+            SUPABASE_KEY === "YOUR_SUPABASE_ANON_KEY"
+        ) {
+            document.getElementById("message").textContent =
+                "⚠ Supabase is not configured. Replace the URL and key in register.html.";
+        }
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        /* If already logged in, redirect to the main app */
+        (async () => {
+            const { data: { session } } = await db.auth.getSession();
+            if (session) window.location.replace("index.html");
+        })();
+
+        const form        = document.getElementById("registerForm");
+        const registerBtn = document.getElementById("registerBtn");
+        const msgEl       = document.getElementById("message");
+
+        form.addEventListener("submit", async function (e) {
+            e.preventDefault();
+            msgEl.textContent = "";
+
+            const empId         = document.getElementById("empId").value.trim().toUpperCase();
+            const email         = document.getElementById("email").value.trim().toLowerCase();
+            const inviteToken   = document.getElementById("inviteToken").value.trim().toUpperCase();
+            const password      = document.getElementById("password").value;
+            const confirmPwd    = document.getElementById("confirmPassword").value;
+
+            /* Validation */
+            if (!empId || !email || !inviteToken || !password || !confirmPwd) {
+                msgEl.textContent = "All fields are required.";
+                return;
+            }
+            if (password.length < 8) {
+                msgEl.textContent = "Password must be at least 8 characters.";
+                return;
+            }
+            if (password !== confirmPwd) {
+                msgEl.textContent = "Passwords do not match.";
+                return;
+            }
+
+            registerBtn.disabled    = true;
+            registerBtn.textContent = "Activating…";
+
+            try {
+                /*
+                 * Step 1: Create the Auth user with signUp().
+                 * This is safe here because the employee is registering
+                 * for themselves — not an admin calling it on their behalf.
+                 * The new session created by signUp() belongs to the employee.
+                 */
+                const { data: signUpData, error: signUpErr } =
+                    await db.auth.signUp({ email, password });
+
+                if (signUpErr) {
+                    if (signUpErr.message?.toLowerCase().includes("already")) {
+                        msgEl.textContent =
+                            "This email is already registered. " +
+                            "If you already have an account, go back and log in.";
+                    } else {
+                        msgEl.textContent = signUpErr.message;
+                    }
+                    return;
+                }
+
+                const userId = signUpData.user?.id;
+                if (!userId) {
+                    msgEl.textContent =
+                        "Account creation failed. Please try again.";
+                    return;
+                }
+
+                /*
+                 * Step 2: Call the claim_employee_account() database function.
+                 * This runs SECURITY DEFINER on the server so it can:
+                 *   - Verify the invite token
+                 *   - Link the new Auth user to the existing employee record
+                 *   - Consume (clear) the invite token so it cannot be reused
+                 */
+                const { data: claimResult, error: claimErr } =
+                    await db.rpc("claim_employee_account", {
+                        p_employee_id:  empId,
+                        p_invite_token: inviteToken,
+                        p_auth_user_id: userId
+                    });
+
+                if (claimErr) {
+                    msgEl.textContent =
+                        "Account linking failed: " + claimErr.message +
+                        " — Please contact your administrator.";
+                    return;
+                }
+
+                if (claimResult?.error) {
+                    msgEl.textContent = claimResult.error;
+                    return;
+                }
+
+                /* Step 3: Sign out (the employee will sign in properly on login.html) */
+                await db.auth.signOut();
+
+                /* Show success state */
+                form.style.display = "none";
+                document.querySelector(".info-box").style.display  = "none";
+                document.querySelector(".back-link").style.display = "none";
+                document.getElementById("successBox").style.display = "block";
+
+            } catch (err) {
+                msgEl.textContent =
+                    "Unexpected error: " + err.message;
+                console.error("Registration error:", err);
+            } finally {
+                registerBtn.disabled    = false;
+                registerBtn.textContent = "Activate Account";
+            }
+        });
+    </script>
+</body>
+</html>

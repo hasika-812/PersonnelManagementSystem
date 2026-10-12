@@ -1,30 +1,31 @@
 /* ============================================================
-   Personnel Management System — Main Script
-   Uses: Supabase (PostgreSQL + Auth)
-   ============================================================
+   Personnel Management System — Main Script  (v2)
+   Backend: Supabase (PostgreSQL + Auth + RLS)
 
    HOW TO CONFIGURE:
-   1. Create a free project at https://supabase.com
-   2. Run the SQL in supabase_schema.sql in the SQL Editor
-   3. Replace the two constants below with your project values:
-      - SUPABASE_URL  → Settings → API → Project URL
-      - SUPABASE_KEY  → Settings → API → anon/public key
+   1. Create a project at https://supabase.com
+   2. Run supabase_schema.sql in the SQL Editor
+   3. Replace the two constants below:
+      SUPABASE_URL  → Settings → API → Project URL
+      SUPABASE_KEY  → Settings → API → anon/public key   ← NOT the service key
+   4. Follow SETUP.md for the complete walkthrough.
    ============================================================ */
 
 const SUPABASE_URL = "YOUR_SUPABASE_URL";
 const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
 
-/* ---- Guard: warn if not configured ---- */
+/* ---- Guard: show clear error if not yet configured ---- */
 if (
     SUPABASE_URL === "YOUR_SUPABASE_URL" ||
     SUPABASE_KEY === "YOUR_SUPABASE_ANON_KEY"
 ) {
     document.body.innerHTML =
-        `<div style="font-family:Arial;max-width:600px;margin:60px auto;padding:30px;background:#fff;border-radius:12px;box-shadow:0 4px 20px #0002;">
+        `<div style="font-family:Arial;max-width:600px;margin:60px auto;padding:30px;
+                     background:#fff;border-radius:12px;box-shadow:0 4px 20px #0002;">
             <h2 style="color:#c0392b;">⚠ Supabase Not Configured</h2>
             <p>Open <strong>script.js</strong> and replace the two placeholder values at the top:</p>
             <ul>
-                <li><code>SUPABASE_URL</code> — your Supabase project URL</li>
+                <li><code>SUPABASE_URL</code> — your Supabase Project URL</li>
                 <li><code>SUPABASE_KEY</code> — your Supabase anon/public key</li>
             </ul>
             <p>Both values are in your Supabase dashboard under <strong>Settings → API</strong>.</p>
@@ -43,7 +44,6 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
    UI HELPERS
    ============================================================ */
 
-/** Show or hide the loading overlay */
 function setLoading(visible) {
     const overlay = document.getElementById("loadingOverlay");
     if (!overlay) return;
@@ -52,7 +52,6 @@ function setLoading(visible) {
 
 let toastTimer = null;
 
-/** Show a toast notification (type: 'success' | 'error' | 'info') */
 function showToast(message, type = "info", duration = 3500) {
     let toast = document.getElementById("toast");
     if (!toast) {
@@ -63,24 +62,19 @@ function showToast(message, type = "info", duration = 3500) {
     toast.textContent = message;
     toast.className = "show " + type;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-        toast.className = "";
-    }, duration);
+    toastTimer = setTimeout(() => { toast.className = ""; }, duration);
 }
 
-/** Set an inline error message on an element */
 function setFieldError(elementId, message) {
     const el = document.getElementById(elementId);
     if (el) el.textContent = message;
 }
 
-/** Clear an inline error message */
 function clearFieldError(elementId) {
     const el = document.getElementById(elementId);
     if (el) el.textContent = "";
 }
 
-/** Disable / re-enable a submit button */
 function setBtnLoading(btnId, isLoading, defaultText) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
@@ -88,12 +82,21 @@ function setBtnLoading(btnId, isLoading, defaultText) {
     btn.textContent = isLoading ? "Please wait…" : defaultText;
 }
 
-/** Create a status badge element */
 function makeBadge(status) {
     const span = document.createElement("span");
-    span.className = "badge badge-" + status.toLowerCase();
+    span.className = "badge badge-" + (status || "").toLowerCase();
     span.textContent = status;
     return span;
+}
+
+/** Return today's date as YYYY-MM-DD */
+function todayISO() {
+    const d = new Date();
+    return [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0")
+    ].join("-");
 }
 
 /* ============================================================
@@ -102,13 +105,8 @@ function makeBadge(status) {
 
 let currentSession = null;   // Supabase Auth session
 let currentProfile = null;   // Row from `profiles` table
-let currentRole = null;      // "admin" | "employee"
+let currentRole    = null;   // "admin" | "employee"
 
-/**
- * Called on every page load.
- * Reads the active Supabase session, fetches the user's profile,
- * then routes to the correct view.
- */
 async function initApp() {
     setLoading(true);
     try {
@@ -121,7 +119,6 @@ async function initApp() {
 
         currentSession = session;
 
-        /* Load profile row */
         const { data: profile, error: profileErr } =
             await db.from("profiles")
                     .select("*")
@@ -130,17 +127,16 @@ async function initApp() {
 
         if (profileErr || !profile) {
             console.error("Profile load error:", profileErr);
+            /* Profile missing — sign out cleanly rather than looping */
             await logout();
             return;
         }
 
         currentProfile = profile;
-        currentRole = profile.role;  // "admin" or "employee"
+        currentRole    = profile.role;
 
-        /* Add logout button to header */
         injectLogoutButton();
 
-        /* Show the correct dashboard */
         if (currentRole === "admin") {
             setupAdminView();
         } else {
@@ -154,17 +150,15 @@ async function initApp() {
     }
 }
 
-/** Inject a logout button in the header */
 function injectLogoutButton() {
     if (document.getElementById("logoutButton")) return;
     const btn = document.createElement("button");
-    btn.id = "logoutButton";
+    btn.id        = "logoutButton";
     btn.textContent = "Logout";
-    btn.onclick = logout;
+    btn.onclick   = logout;
     document.querySelector("header")?.appendChild(btn);
 }
 
-/** Sign out and redirect to login */
 async function logout() {
     await db.auth.signOut();
     window.location.replace("login.html");
@@ -175,26 +169,23 @@ async function logout() {
    ============================================================ */
 
 function setupAdminView() {
-    /* Show admin nav and sections */
-    document.getElementById("adminNav").style.display = "";
-    document.getElementById("dashboard").style.display = "";
-    document.getElementById("addEmployee").style.display = "";
-    document.getElementById("employeeRecords").style.display = "";
-    document.getElementById("attendance").style.display = "";
-    document.getElementById("leaveManagement").style.display = "";
+    document.getElementById("adminNav").style.display          = "";
+    document.getElementById("dashboard").style.display         = "";
+    document.getElementById("addEmployee").style.display       = "";
+    document.getElementById("employeeRecords").style.display   = "";
+    document.getElementById("attendance").style.display        = "";
+    document.getElementById("leaveManagement").style.display   = "";
     document.getElementById("employeeDashboard").style.display = "none";
 
     wireAddEmployeeForm();
     wireEditEmployeeForm();
     wireAttendanceForm();
-    wireAdminLeaveActions();
 
     loadDashboardStats();
     loadEmployees();
     loadAttendanceRecords();
     loadAdminLeaveRequests();
 
-    /* Pre-fill today's date */
     const attDate = document.getElementById("attendanceDate");
     if (attDate) attDate.valueAsDate = new Date();
 }
@@ -207,19 +198,22 @@ async function loadDashboardStats() {
     try {
         const [empResult, leaveResult, attResult] = await Promise.all([
             db.from("employees").select("id", { count: "exact", head: true }),
-            db.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "Pending"),
+            db.from("leave_requests")
+              .select("id", { count: "exact", head: true })
+              .eq("status", "Pending"),
             db.from("attendance")
               .select("id", { count: "exact", head: true })
               .eq("date", todayISO())
               .eq("status", "Present")
         ]);
 
-        document.getElementById("statTotalEmployees").textContent =
-            empResult.count ?? "—";
-        document.getElementById("statPendingLeaves").textContent =
-            leaveResult.count ?? "—";
-        document.getElementById("statTodayPresent").textContent =
-            attResult.count ?? "—";
+        const el = (id, val) => {
+            const node = document.getElementById(id);
+            if (node) node.textContent = val ?? "—";
+        };
+        el("statTotalEmployees", empResult.count);
+        el("statPendingLeaves",  leaveResult.count);
+        el("statTodayPresent",   attResult.count);
     } catch (err) {
         console.error("Stats error:", err);
     }
@@ -229,7 +223,7 @@ async function loadDashboardStats() {
    ADMIN — EMPLOYEE MANAGEMENT
    ============================================================ */
 
-let allEmployees = [];   // Local cache for the dropdown
+let allEmployees = [];
 
 async function loadEmployees() {
     try {
@@ -249,7 +243,7 @@ async function loadEmployees() {
 }
 
 function renderEmployeeTable(data) {
-    const tbody = document.getElementById("employeeList");
+    const tbody    = document.getElementById("employeeList");
     const emptyMsg = document.getElementById("emptyMessage");
     if (!tbody) return;
 
@@ -288,18 +282,46 @@ function renderEmployeeTable(data) {
             tr.appendChild(td);
         });
 
-        /* Action buttons */
+        /* Invite token indicator */
+        const tokenTd = document.createElement("td");
+        if (!emp.auth_user_id) {
+            /* Account not yet claimed — show the token for the admin to share */
+            tokenTd.innerHTML =
+                `<span style="font-size:12px;color:#856404;background:#fff3cd;
+                              padding:3px 8px;border-radius:10px;">
+                    Pending claim
+                </span>`;
+        } else {
+            tokenTd.innerHTML =
+                `<span style="font-size:12px;color:#1a6633;background:#d1f0da;
+                              padding:3px 8px;border-radius:10px;">
+                    Active
+                </span>`;
+        }
+        tr.appendChild(tokenTd);
+
         const actionTd = document.createElement("td");
+
         const editBtn = document.createElement("button");
-        editBtn.textContent = "Edit";
-        editBtn.className = "edit-btn";
-        editBtn.onclick = () => openEditModal(emp);
+        editBtn.textContent  = "Edit";
+        editBtn.className    = "edit-btn";
+        editBtn.onclick      = () => openEditModal(emp);
 
         const delBtn = document.createElement("button");
-        delBtn.textContent = "Delete";
-        delBtn.className = "delete-btn";
+        delBtn.textContent   = "Delete";
+        delBtn.className     = "delete-btn";
         delBtn.style.marginLeft = "6px";
-        delBtn.onclick = () => confirmDeleteEmployee(emp);
+        delBtn.onclick       = () => confirmDeleteEmployee(emp);
+
+        /* Show invite details button only for unclaimed accounts */
+        if (!emp.auth_user_id) {
+            const inviteBtn = document.createElement("button");
+            inviteBtn.textContent = "Show Invite";
+            inviteBtn.style.cssText =
+                "margin-left:6px;background:#856404;color:white;";
+            inviteBtn.onclick = () => showInviteDetails(emp);
+            actionTd.appendChild(inviteBtn);
+        }
 
         actionTd.appendChild(editBtn);
         actionTd.appendChild(delBtn);
@@ -308,13 +330,40 @@ function renderEmployeeTable(data) {
     });
 }
 
-/* Search filter */
+/**
+ * Show the admin the invite token so they can pass it to the employee.
+ * In a real deployment this would be sent via email.
+ */
+async function showInviteDetails(emp) {
+    /* Fetch the invite_token from profiles for this employee_id */
+    const { data: profile, error } = await db
+        .from("profiles")
+        .select("invite_token")
+        .eq("employee_id", emp.employee_id)
+        .single();
+
+    if (error || !profile?.invite_token) {
+        showToast("Could not retrieve invite token.", "error");
+        return;
+    }
+
+    alert(
+        `Invite details for ${emp.name} (${emp.employee_id})\n\n` +
+        `Tell the employee to open register.html and enter:\n\n` +
+        `  Employee ID   : ${emp.employee_id}\n` +
+        `  Email         : ${emp.email}\n` +
+        `  Invite Token  : ${profile.invite_token}\n\n` +
+        `They will set their own password on that page.`
+    );
+}
+
 const searchInput = document.getElementById("searchEmployee");
 if (searchInput) {
     searchInput.addEventListener("input", () => renderEmployeeTable(allEmployees));
 }
 
-/** Wire the Add Employee form */
+/* ---- Add Employee ---- */
+
 function wireAddEmployeeForm() {
     const form = document.getElementById("employeeForm");
     if (!form) return;
@@ -329,7 +378,6 @@ function wireAddEmployeeForm() {
         const department  = document.getElementById("empDepartment").value;
         const designation = document.getElementById("empDesignation").value.trim();
         const salary      = Number(document.getElementById("empSalary").value);
-        const password    = document.getElementById("empPassword").value;
 
         /* Client-side validation */
         if (!empId || !name || !email || !department || !designation) {
@@ -344,47 +392,39 @@ function wireAddEmployeeForm() {
             setFieldError("addEmployeeMessage", "Enter a valid salary.");
             return;
         }
-        if (password.length < 8) {
-            setFieldError("addEmployeeMessage", "Password must be at least 8 characters.");
-            return;
-        }
 
         setBtnLoading("addEmpBtn", true, "Add Employee");
 
         try {
             /*
-             * Step 1: Create an Auth user for the employee.
-             * We use the admin API via the service-role key which is
-             * set in the Edge Function. Here we call our helper RPC.
-             * See SETUP.md for creating the Edge Function.
+             * HOW EMPLOYEE ACCOUNTS WORK (Invite-Token Flow):
              *
-             * For a simpler approach that works without a server,
-             * we call signUp and then immediately sign back in as admin.
+             * Calling auth.signUp() from the admin's browser session
+             * would silently sign the admin OUT and sign the new
+             * employee IN — breaking the admin's active session.
+             * This is a fundamental limitation of the Supabase JS
+             * client in a browser context.
+             *
+             * Instead we use an invite-token approach:
+             *   1. Admin creates the employee record (no Auth user yet).
+             *   2. A random token is generated and stored in profiles.
+             *   3. Admin shares the Employee ID + token with the employee.
+             *   4. Employee opens register.html, enters their details,
+             *      and calls signUp() themselves.
+             *   5. A database function links the new Auth user to the
+             *      existing employee record and consumes the token.
+             *
+             * This is the standard invite flow used in production apps.
              */
-            const { data: signUpData, error: signUpErr } =
-                await db.auth.signUp({ email, password });
 
-            if (signUpErr) {
-                /* Common error: email already registered */
-                if (signUpErr.message?.toLowerCase().includes("already")) {
-                    setFieldError("addEmployeeMessage",
-                        "This email is already registered. Use a different email.");
-                } else {
-                    setFieldError("addEmployeeMessage", signUpErr.message);
-                }
-                return;
-            }
+            /* Generate a random 8-character invite token */
+            const inviteToken = Array.from(
+                crypto.getRandomValues(new Uint8Array(6))
+            ).map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 
-            const userId = signUpData.user?.id;
-            if (!userId) {
-                setFieldError("addEmployeeMessage",
-                    "Could not create user account. Try again.");
-                return;
-            }
-
-            /* Step 2: Insert the employee record linked to the Auth user */
+            /* Step 1: Insert the employee record (no auth_user_id yet) */
             const { error: empErr } = await db.from("employees").insert({
-                auth_user_id: userId,
+                auth_user_id: null,
                 employee_id:  empId,
                 name,
                 email,
@@ -394,12 +434,14 @@ function wireAddEmployeeForm() {
             });
 
             if (empErr) {
-                if (empErr.message?.toLowerCase().includes("unique") ||
-                    empErr.code === "23505") {
-                    const detail = empErr.details || empErr.message;
-                    if (detail.includes("employee_id")) {
+                if (empErr.code === "23505") {
+                    const detail = empErr.details || empErr.message || "";
+                    if (detail.toLowerCase().includes("employee_id")) {
                         setFieldError("addEmployeeMessage",
                             "Employee ID already exists. Choose a different ID.");
+                    } else if (detail.toLowerCase().includes("email")) {
+                        setFieldError("addEmployeeMessage",
+                            "An employee with this email already exists.");
                     } else {
                         setFieldError("addEmployeeMessage",
                             "Duplicate entry. Check Employee ID and email.");
@@ -411,22 +453,46 @@ function wireAddEmployeeForm() {
                 return;
             }
 
-            /* Step 3: Insert profile row for role-based access */
+            /* Step 2: Insert a profiles row with the invite token.
+               The profile's id is a placeholder UUID (gen_random_uuid)
+               that will be replaced by the real auth.users UUID when the
+               employee claims their account via register.html.            */
+            const placeholderUUID = crypto.randomUUID();
+
             const { error: profErr } = await db.from("profiles").insert({
-                id:   userId,
-                role: "employee",
-                employee_id: empId
+                id:           placeholderUUID,
+                role:         "employee",
+                employee_id:  empId,
+                invite_token: inviteToken
             });
 
             if (profErr) {
-                console.warn("Profile insert warning:", profErr.message);
-                /* Not fatal — the employee row exists; profile may have
-                   been created by the Auth trigger. */
+                /* Roll back the employee row so we don't leave an orphan */
+                await db.from("employees")
+                        .delete()
+                        .eq("employee_id", empId);
+
+                setFieldError("addEmployeeMessage",
+                    "Could not create invite: " + profErr.message);
+                return;
             }
 
             form.reset();
             clearFieldError("addEmployeeMessage");
-            showToast("Employee '" + name + "' added successfully!", "success");
+
+            /* Show the admin the invite token immediately */
+            alert(
+                `Employee "${name}" added successfully!\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `Share these details with the employee:\n\n` +
+                `  Employee ID   : ${empId}\n` +
+                `  Email         : ${email}\n` +
+                `  Invite Token  : ${inviteToken}\n\n` +
+                `The employee must open register.html and use these\n` +
+                `details to set their password and activate their account.\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            );
+
             await loadEmployees();
             await loadDashboardStats();
 
@@ -443,17 +509,16 @@ function wireAddEmployeeForm() {
 /* ---- Edit Employee Modal ---- */
 
 function openEditModal(emp) {
-    document.getElementById("editEmpDbId").value = emp.id;
-    document.getElementById("editEmpId").value = emp.employee_id;
-    document.getElementById("editEmpName").value = emp.name;
-    document.getElementById("editEmpEmail").value = emp.email;
-    document.getElementById("editEmpDepartment").value = emp.department;
+    document.getElementById("editEmpDbId").value        = emp.id;
+    document.getElementById("editEmpId").value          = emp.employee_id;
+    document.getElementById("editEmpName").value        = emp.name;
+    document.getElementById("editEmpEmail").value       = emp.email;
+    document.getElementById("editEmpDepartment").value  = emp.department;
     document.getElementById("editEmpDesignation").value = emp.designation;
-    document.getElementById("editEmpSalary").value = emp.salary;
+    document.getElementById("editEmpSalary").value      = emp.salary;
     clearFieldError("editMessage");
 
-    const modal = document.getElementById("editModal");
-    modal.style.display = "flex";
+    document.getElementById("editModal").style.display = "flex";
 }
 
 function closeEditModal() {
@@ -468,7 +533,7 @@ function wireEditEmployeeForm() {
         e.preventDefault();
         clearFieldError("editMessage");
 
-        const dbId = document.getElementById("editEmpDbId").value;
+        const dbId        = document.getElementById("editEmpDbId").value;
         const empId       = document.getElementById("editEmpId").value.trim();
         const name        = document.getElementById("editEmpName").value.trim();
         const email       = document.getElementById("editEmpEmail").value.trim().toLowerCase();
@@ -516,17 +581,16 @@ function wireEditEmployeeForm() {
     });
 }
 
-/** Confirm and delete an employee */
 async function confirmDeleteEmployee(emp) {
     if (!confirm(
         `Delete employee "${emp.name}" (${emp.employee_id})?\n\n` +
-        "This will also delete their attendance records and leave requests."
+        "This will also remove their attendance records and leave requests."
     )) return;
 
     setLoading(true);
     try {
-        /* Cascade deletes are defined in the DB schema (ON DELETE CASCADE),
-           so deleting the employee row also clears related records. */
+        /* ON DELETE CASCADE on attendance and leave_requests handles
+           the related rows automatically. */
         const { error } = await db
             .from("employees")
             .delete()
@@ -551,20 +615,19 @@ async function confirmDeleteEmployee(emp) {
    ADMIN — ATTENDANCE
    ============================================================ */
 
-/** Fill the employee dropdown in the attendance form */
 function populateAttendanceDropdown(employees) {
     const select = document.getElementById("attendanceEmployee");
     if (!select) return;
 
     select.replaceChildren();
     const defaultOpt = document.createElement("option");
-    defaultOpt.value = "";
+    defaultOpt.value       = "";
     defaultOpt.textContent = "Select Employee";
     select.appendChild(defaultOpt);
 
     employees.forEach(emp => {
         const opt = document.createElement("option");
-        opt.value = emp.id;   // DB primary key (UUID)
+        opt.value       = emp.id;
         opt.textContent = emp.employee_id + " – " + emp.name;
         select.appendChild(opt);
     });
@@ -585,13 +648,12 @@ async function loadAttendanceRecords(filterEmpId = null, filterDate = null) {
             .order("date", { ascending: false });
 
         if (filterEmpId) {
-            /* filterEmpId here is the employee_id text field */
             const emp = allEmployees.find(
                 e => e.employee_id.toLowerCase() === filterEmpId.toLowerCase()
             );
-            if (emp) query = query.eq("employee_id_fk", emp.id);
-            else {
-                /* No match — show empty */
+            if (emp) {
+                query = query.eq("employee_id_fk", emp.id);
+            } else {
                 renderAttendanceTable([]);
                 return;
             }
@@ -623,31 +685,27 @@ function renderAttendanceTable(records) {
         ? "No attendance records yet." : "";
 
     records.forEach(rec => {
-        const tr = document.createElement("tr");
+        const tr  = document.createElement("tr");
         const emp = rec.employees || {};
 
-        [
-            emp.employee_id ?? "—",
-            emp.name ?? "—",
-            rec.date,
-            ""   // status badge placeholder
-        ].forEach((val, i) => {
+        [emp.employee_id ?? "—", emp.name ?? "—", rec.date].forEach(val => {
             const td = document.createElement("td");
-            if (i === 3) {
-                td.appendChild(makeBadge(rec.status));
-            } else {
-                td.textContent = val;
-            }
+            td.textContent = val;
             tr.appendChild(td);
         });
 
+        const statusTd = document.createElement("td");
+        statusTd.appendChild(makeBadge(rec.status));
+        tr.appendChild(statusTd);
+
         const actionTd = document.createElement("td");
-        const delBtn = document.createElement("button");
+        const delBtn   = document.createElement("button");
         delBtn.textContent = "Delete";
-        delBtn.className = "delete-btn";
-        delBtn.onclick = () => deleteAttendanceRecord(rec.id);
+        delBtn.className   = "delete-btn";
+        delBtn.onclick     = () => deleteAttendanceRecord(rec.id);
         actionTd.appendChild(delBtn);
         tr.appendChild(actionTd);
+
         tbody.appendChild(tr);
     });
 }
@@ -665,7 +723,6 @@ async function deleteAttendanceRecord(id) {
     }
 }
 
-/** Attendance filter buttons */
 function applyAttendanceFilter() {
     const empId = document.getElementById("filterAttEmployee")?.value.trim();
     const date  = document.getElementById("filterAttDate")?.value;
@@ -673,10 +730,10 @@ function applyAttendanceFilter() {
 }
 
 function clearAttendanceFilter() {
-    const empField = document.getElementById("filterAttEmployee");
-    const dateField = document.getElementById("filterAttDate");
-    if (empField) empField.value = "";
-    if (dateField) dateField.value = "";
+    const ef = document.getElementById("filterAttEmployee");
+    const df = document.getElementById("filterAttDate");
+    if (ef) ef.value = "";
+    if (df) df.value = "";
     loadAttendanceRecords();
 }
 
@@ -701,7 +758,7 @@ function wireAttendanceForm() {
         setBtnLoading("saveAttendanceBtn", true, "Save Attendance");
 
         try {
-            /* Check duplicate */
+            /* Check for duplicate before insert */
             const { data: existing } = await db
                 .from("attendance")
                 .select("id")
@@ -728,9 +785,9 @@ function wireAttendanceForm() {
             showToast("Attendance saved.", "success");
             await loadAttendanceRecords();
             await loadDashboardStats();
+
         } catch (err) {
-            setFieldError("attendanceFormMessage",
-                "Error: " + err.message);
+            setFieldError("attendanceFormMessage", "Error: " + err.message);
         } finally {
             setBtnLoading("saveAttendanceBtn", false, "Save Attendance");
         }
@@ -775,39 +832,38 @@ function renderAdminLeaveTable(requests) {
         ? "No leave requests yet." : "";
 
     requests.forEach(req => {
-        const tr = document.createElement("tr");
+        const tr  = document.createElement("tr");
         const emp = req.employees || {};
 
         [
             emp.employee_id ?? "—",
-            emp.name ?? "—",
+            emp.name        ?? "—",
             req.start_date,
             req.end_date,
-            req.reason,
-            ""  // badge placeholder
-        ].forEach((val, i) => {
+            req.reason
+        ].forEach(val => {
             const td = document.createElement("td");
-            if (i === 5) {
-                td.appendChild(makeBadge(req.status));
-            } else {
-                td.textContent = val;
-            }
+            td.textContent = val;
             tr.appendChild(td);
         });
+
+        const statusTd = document.createElement("td");
+        statusTd.appendChild(makeBadge(req.status));
+        tr.appendChild(statusTd);
 
         const actionTd = document.createElement("td");
 
         if (req.status === "Pending") {
             const approveBtn = document.createElement("button");
-            approveBtn.textContent = "Approve";
-            approveBtn.className = "approve-btn";
-            approveBtn.onclick = () => updateLeaveStatus(req.id, "Approved");
+            approveBtn.textContent    = "Approve";
+            approveBtn.className      = "approve-btn";
+            approveBtn.onclick        = () => updateLeaveStatus(req.id, "Approved");
 
             const rejectBtn = document.createElement("button");
-            rejectBtn.textContent = "Reject";
-            rejectBtn.className = "reject-btn";
+            rejectBtn.textContent     = "Reject";
+            rejectBtn.className       = "reject-btn";
             rejectBtn.style.marginLeft = "6px";
-            rejectBtn.onclick = () => updateLeaveStatus(req.id, "Rejected");
+            rejectBtn.onclick         = () => updateLeaveStatus(req.id, "Rejected");
 
             actionTd.appendChild(approveBtn);
             actionTd.appendChild(rejectBtn);
@@ -826,11 +882,11 @@ async function updateLeaveStatus(requestId, newStatus) {
             .from("leave_requests")
             .update({ status: newStatus })
             .eq("id", requestId)
-            .eq("status", "Pending");   // safety: only update pending
+            .eq("status", "Pending");   /* DB-side safety: only update Pending rows */
 
         if (error) throw error;
 
-        showToast("Leave request " + newStatus.toLowerCase() + "d.", "success");
+        showToast("Leave request " + newStatus.toLowerCase() + ".", "success");
         await loadAdminLeaveRequests();
         await loadDashboardStats();
     } catch (err) {
@@ -839,24 +895,17 @@ async function updateLeaveStatus(requestId, newStatus) {
     }
 }
 
-function wireAdminLeaveActions() {
-    /* Nothing to wire beyond the inline onclick handlers
-       in renderAdminLeaveTable. This function is a placeholder
-       in case global actions are added later. */
-}
-
 /* ============================================================
    EMPLOYEE VIEW
    ============================================================ */
 
 async function setupEmployeeView() {
-    /* Hide admin sections, show employee dashboard */
-    document.getElementById("adminNav").style.display = "none";
-    document.getElementById("dashboard").style.display = "none";
-    document.getElementById("addEmployee").style.display = "none";
-    document.getElementById("employeeRecords").style.display = "none";
-    document.getElementById("attendance").style.display = "none";
-    document.getElementById("leaveManagement").style.display = "none";
+    document.getElementById("adminNav").style.display          = "none";
+    document.getElementById("dashboard").style.display         = "none";
+    document.getElementById("addEmployee").style.display       = "none";
+    document.getElementById("employeeRecords").style.display   = "none";
+    document.getElementById("attendance").style.display        = "none";
+    document.getElementById("leaveManagement").style.display   = "none";
     document.getElementById("employeeDashboard").style.display = "block";
     document.getElementById("employeeLeaveSection").style.display = "block";
 
@@ -867,10 +916,8 @@ async function setupEmployeeView() {
     await loadMyLeaveRequests();
 }
 
-/** Load and render the logged-in employee's profile */
 async function loadEmployeeProfile() {
     try {
-        /* currentProfile has the profile row; load the full employee record */
         const { data: emp, error } = await db
             .from("employees")
             .select("*")
@@ -886,7 +933,6 @@ async function loadEmployeeProfile() {
             return;
         }
 
-        /* Store for later use (leave submission, etc.) */
         currentProfile._employee = emp;
 
         const profileDiv = document.getElementById("myProfile");
@@ -901,7 +947,7 @@ async function loadEmployeeProfile() {
             ["Designation",    emp.designation],
             ["Monthly Salary", "₹" + Number(emp.salary).toLocaleString("en-IN")]
         ].forEach(([label, value]) => {
-            const p = document.createElement("p");
+            const p      = document.createElement("p");
             const strong = document.createElement("strong");
             strong.textContent = label + ": ";
             p.append(strong, document.createTextNode(value ?? ""));
@@ -912,16 +958,12 @@ async function loadEmployeeProfile() {
     }
 }
 
-/** Load and render the employee's own attendance records */
 async function loadMyAttendance() {
     try {
-        const userId = currentSession.user.id;
-
-        /* Get employee DB id first */
         const { data: emp } = await db
             .from("employees")
             .select("id")
-            .eq("auth_user_id", userId)
+            .eq("auth_user_id", currentSession.user.id)
             .single();
 
         if (!emp) return;
@@ -941,9 +983,7 @@ async function loadMyAttendance() {
 
         if (tbody) tbody.replaceChildren();
 
-        const yearRecords = (records || []).filter(r =>
-            r.date.startsWith(thisYear)
-        );
+        const yearRecords = (records || []).filter(r => r.date.startsWith(thisYear));
 
         const presentDays = yearRecords.filter(
             r => r.status.toLowerCase() === "present"
@@ -954,24 +994,19 @@ async function loadMyAttendance() {
         ).length;
 
         const el = (id) => document.getElementById(id);
-        if (el("myPresentDays")) el("myPresentDays").textContent = presentDays;
-        if (el("myLeaveDays"))   el("myLeaveDays").textContent   = leaveDays;
-        if (el("myLeaveBalance")) {
-            el("myLeaveBalance").textContent = Math.max(0, 12 - leaveDays);
-        }
+        if (el("myPresentDays"))  el("myPresentDays").textContent  = presentDays;
+        if (el("myLeaveDays"))    el("myLeaveDays").textContent    = leaveDays;
+        if (el("myLeaveBalance")) el("myLeaveBalance").textContent = Math.max(0, 12 - leaveDays);
 
         if (attMsg) attMsg.textContent = (records?.length ?? 0) === 0
             ? "No attendance records yet." : "";
 
         (records || []).forEach(rec => {
-            const tr = document.createElement("tr");
-
-            const dateTd = document.createElement("td");
-            dateTd.textContent = rec.date;
-
+            const tr       = document.createElement("tr");
+            const dateTd   = document.createElement("td");
             const statusTd = document.createElement("td");
+            dateTd.textContent = rec.date;
             statusTd.appendChild(makeBadge(rec.status));
-
             tr.appendChild(dateTd);
             tr.appendChild(statusTd);
             if (tbody) tbody.appendChild(tr);
@@ -982,15 +1017,12 @@ async function loadMyAttendance() {
     }
 }
 
-/** Load and render the employee's own leave requests */
 async function loadMyLeaveRequests() {
     try {
-        const userId = currentSession.user.id;
-
         const { data: emp } = await db
             .from("employees")
             .select("id")
-            .eq("auth_user_id", userId)
+            .eq("auth_user_id", currentSession.user.id)
             .single();
 
         if (!emp) return;
@@ -1032,7 +1064,6 @@ async function loadMyLeaveRequests() {
     }
 }
 
-/** Wire the leave application form */
 function wireLeaveForm() {
     const form = document.getElementById("leaveForm");
     if (!form) return;
@@ -1058,11 +1089,10 @@ function wireLeaveForm() {
         setBtnLoading("submitLeaveBtn", true, "Submit Leave Request");
 
         try {
-            const userId = currentSession.user.id;
             const { data: emp } = await db
                 .from("employees")
                 .select("id")
-                .eq("auth_user_id", userId)
+                .eq("auth_user_id", currentSession.user.id)
                 .single();
 
             if (!emp) {
@@ -1077,6 +1107,8 @@ function wireLeaveForm() {
                 end_date:       endDate,
                 reason,
                 status:         "Pending"
+                /* The RLS INSERT policy enforces status = 'Pending',
+                   so this cannot be bypassed from the frontend. */
             });
 
             if (error) throw error;
@@ -1092,20 +1124,6 @@ function wireLeaveForm() {
             setBtnLoading("submitLeaveBtn", false, "Submit Leave Request");
         }
     });
-}
-
-/* ============================================================
-   UTILITY
-   ============================================================ */
-
-/** Return today's date as YYYY-MM-DD */
-function todayISO() {
-    const d = new Date();
-    return [
-        d.getFullYear(),
-        String(d.getMonth() + 1).padStart(2, "0"),
-        String(d.getDate()).padStart(2, "0")
-    ].join("-");
 }
 
 /* ============================================================
