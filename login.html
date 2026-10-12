@@ -153,18 +153,8 @@
            IMPORTANT: Replace these two values with your project's
            actual URL and anon key from Supabase → Settings → API
            -------------------------------------------------------- */
-        const SUPABASE_URL = "YOUR_SUPABASE_URL";
-        const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
-
-        if (
-            SUPABASE_URL === "YOUR_SUPABASE_URL" ||
-            SUPABASE_KEY === "YOUR_SUPABASE_ANON_KEY"
-        ) {
-            document.getElementById("message").textContent =
-                "⚠ Supabase is not configured. Open login.html and script.js, " +
-                "then replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY. " +
-                "See SETUP.md for instructions.";
-        }
+        const SUPABASE_URL = "https://byayczplhpghgksnhbfk.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5YXljenBsaHBnaGdrc25oYmZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4MTAyMzksImV4cCI6MjEwNzM4NjIzOX0.mxiakNKuJv-KWn2NRRkJJ3Y54iTaWTytHoTMifPasEE";
 
         const { createClient } = supabase;
         const db = createClient(SUPABASE_URL, SUPABASE_KEY);

@@ -11,28 +11,8 @@
    4. Follow SETUP.md for the complete walkthrough.
    ============================================================ */
 
-const SUPABASE_URL = "YOUR_SUPABASE_URL";
-const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
-
-/* ---- Guard: show clear error if not yet configured ---- */
-if (
-    SUPABASE_URL === "YOUR_SUPABASE_URL" ||
-    SUPABASE_KEY === "YOUR_SUPABASE_ANON_KEY"
-) {
-    document.body.innerHTML =
-        `<div style="font-family:Arial;max-width:600px;margin:60px auto;padding:30px;
-                     background:#fff;border-radius:12px;box-shadow:0 4px 20px #0002;">
-            <h2 style="color:#c0392b;">⚠ Supabase Not Configured</h2>
-            <p>Open <strong>script.js</strong> and replace the two placeholder values at the top:</p>
-            <ul>
-                <li><code>SUPABASE_URL</code> — your Supabase Project URL</li>
-                <li><code>SUPABASE_KEY</code> — your Supabase anon/public key</li>
-            </ul>
-            <p>Both values are in your Supabase dashboard under <strong>Settings → API</strong>.</p>
-            <p>See <strong>SETUP.md</strong> for full instructions.</p>
-        </div>`;
-    throw new Error("Supabase not configured. See SETUP.md.");
-}
+const SUPABASE_URL = "https://byayczplhpghgksnhbfk.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5YXljenBsaHBnaGdrc25oYmZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4MTAyMzksImV4cCI6MjEwNzM4NjIzOX0.mxiakNKuJv-KWn2NRRkJJ3Y54iTaWTytHoTMifPasEE";
 
 /* ============================================================
    SUPABASE CLIENT
