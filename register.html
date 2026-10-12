@@ -283,16 +283,22 @@
 
                 /*
                  * Step 2: Call the claim_employee_account() database function.
-                 * This runs SECURITY DEFINER on the server so it can:
-                 *   - Verify the invite token
-                 *   - Link the new Auth user to the existing employee record
-                 *   - Consume (clear) the invite token so it cannot be reused
+                 *
+                 * NOTE: p_auth_user_id is intentionally NOT passed.
+                 * The function uses auth.uid() from the verified JWT —
+                 * the value Supabase injects server-side — so the caller
+                 * cannot supply a forged UUID to impersonate another user.
+                 *
+                 * The function verifies:
+                 *   - The Employee ID exists and is unclaimed
+                 *   - The caller's JWT email matches employees.email
+                 *   - The invite token is correct
+                 * Then atomically links the account and consumes the token.
                  */
                 const { data: claimResult, error: claimErr } =
                     await db.rpc("claim_employee_account", {
                         p_employee_id:  empId,
-                        p_invite_token: inviteToken,
-                        p_auth_user_id: userId
+                        p_invite_token: inviteToken
                     });
 
                 if (claimErr) {

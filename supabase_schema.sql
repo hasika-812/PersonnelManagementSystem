@@ -1,47 +1,50 @@
 -- ============================================================
 --  Personnel Management System — Supabase / PostgreSQL Schema
---  Version 2 — Security-reviewed
+--  Version 3 — Security-reviewed
 --
 --  HOW TO USE:
 --  1. Paste this entire file into Supabase Dashboard → SQL Editor
---  2. Click Run.  It is safe to run on a fresh project.
---  3. Follow the steps at the bottom to create the admin account.
---  4. Read SETUP.md for the complete setup walkthrough.
+--  2. Click Run.  Safe to run on a completely fresh project.
+--  3. Follow the instructions at the bottom to create the admin.
+--  4. Read SETUP.md for the full walkthrough.
+--
+--  This file has NOT been run against a live Supabase project.
+--  It has been reviewed for logical correctness but not
+--  integration-tested. Treat the first run as your validation.
 -- ============================================================
 
 
 -- ============================================================
--- SECTION 0 — DROP OLD TRIGGERS (safe re-run guard)
---   Drop triggers before their functions so there are no
---   dependency errors if you run this file more than once.
+-- SECTION 0 — SAFE RE-RUN GUARDS
+--   Drop triggers before their functions.  Policies are
+--   dropped inline (DROP POLICY IF EXISTS before each CREATE).
 -- ============================================================
 
-DROP TRIGGER IF EXISTS on_auth_user_created    ON auth.users;
-DROP TRIGGER IF EXISTS employees_updated_at    ON public.employees;
+DROP TRIGGER IF EXISTS on_auth_user_created      ON auth.users;
+DROP TRIGGER IF EXISTS employees_updated_at      ON public.employees;
 DROP TRIGGER IF EXISTS leave_requests_updated_at ON public.leave_requests;
 
 
 -- ============================================================
--- SECTION 1 — SAFE ROLE-CHECK HELPER FUNCTION
+-- SECTION 1 — ROLE-CHECK HELPER FUNCTION
 --
---   WHY THIS EXISTS:
---   RLS policies on the `profiles` table cannot safely query
---   `profiles` again inside their own USING / WITH CHECK
---   expressions — PostgreSQL evaluates those subqueries
---   recursively and throws a stack-depth error.
+--   WHY THIS IS NECESSARY:
+--   RLS policies on `profiles` cannot safely subquery `profiles`
+--   in their own USING / WITH CHECK expressions — PostgreSQL
+--   recurses infinitely and throws a stack-depth error.
 --
---   This SECURITY DEFINER function runs as the database owner
---   (bypassing RLS) so it can read profiles without recursion.
---   It is the only safe way to check roles from within an
---   RLS policy on the profiles table itself.
+--   This SECURITY DEFINER function runs as the database owner,
+--   bypasses RLS, and reads the caller's role safely.
+--   Every policy that needs to know "is this user an admin?"
+--   calls get_my_role() instead of querying profiles directly.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS TEXT
 LANGUAGE sql
-STABLE          -- result does not change within a single SQL statement
+STABLE
 SECURITY DEFINER
-SET search_path = public   -- prevent search_path injection
+SET search_path = public
 AS $$
     SELECT role
     FROM   public.profiles
@@ -49,19 +52,32 @@ AS $$
     LIMIT  1;
 $$;
 
--- Revoke public execute so only authenticated DB users can call it.
 REVOKE EXECUTE ON FUNCTION public.get_my_role() FROM PUBLIC;
 GRANT  EXECUTE ON FUNCTION public.get_my_role() TO authenticated;
 
 
 -- ============================================================
 -- SECTION 2 — PROFILES TABLE
+--
 --   One row per Auth user.
---   role        = 'admin' | 'employee'
---   employee_id = the text Employee ID (e.g. "EMP001");
---                 NULL for admin accounts.
---   invite_token = random token used by employees to claim
---                  their account on first login (see SECTION 7).
+--
+--   role         = 'admin' | 'employee'
+--   employee_id  = text Employee ID (e.g. "EMP001"); NULL for admin
+--   invite_token = single-use token for employee account claim;
+--                  set to NULL once the account is claimed.
+--
+--   IMPORTANT — two kinds of rows exist in this table:
+--
+--   A. Placeholder rows  (created by admin before the employee
+--      signs up).  These have a random placeholder UUID as `id`
+--      because there is no auth.users row yet.  They have a
+--      non-NULL invite_token.
+--
+--   B. Real rows  (created / promoted during or after signUp).
+--      `id` = the actual auth.users UUID.  invite_token = NULL.
+--
+--   The claim_employee_account() function in Section 8 converts
+--   a placeholder row into a real row atomically.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -70,63 +86,57 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     role          TEXT        NOT NULL
                               CHECK (role IN ('admin', 'employee')),
     employee_id   TEXT,
-    invite_token  TEXT        UNIQUE,   -- used for employee self-registration
+    invite_token  TEXT        UNIQUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- ── SELECT ──────────────────────────────────────────────────
--- Any authenticated user can read their own row.
+-- ── SELECT ───────────────────────────────────────────────────
 DROP POLICY IF EXISTS "profiles_select_own"   ON public.profiles;
 CREATE POLICY "profiles_select_own"
     ON public.profiles FOR SELECT
     USING (auth.uid() = id);
 
--- Admins can read all rows.
--- Uses get_my_role() to avoid recursive self-reference.
 DROP POLICY IF EXISTS "profiles_select_admin" ON public.profiles;
 CREATE POLICY "profiles_select_admin"
     ON public.profiles FOR SELECT
     USING (public.get_my_role() = 'admin');
 
--- ── INSERT ──────────────────────────────────────────────────
--- Allow insert only when:
---   (a) the current user is an admin, OR
---   (b) the row being inserted belongs to the current user
---       AND its role is forced to 'employee'
---       (covers the self-registration / invite-claim path).
--- The trigger handle_new_user() also inserts via SECURITY DEFINER
--- and is exempt from RLS, so we do not need a service_role clause.
-DROP POLICY IF EXISTS "profiles_insert_admin"     ON public.profiles;
-DROP POLICY IF EXISTS "profiles_insert_self_emp"  ON public.profiles;
+-- ── INSERT ───────────────────────────────────────────────────
+-- Admins can insert profile rows (e.g. the admin-promotion step).
+-- The handle_new_user() trigger inserts via SECURITY DEFINER and
+-- is not subject to RLS.
+-- The claim_employee_account() RPC also uses SECURITY DEFINER
+-- and is not subject to RLS.
+-- Employees must NOT be able to insert their own profile rows
+-- directly, because that would let them choose their own role.
+DROP POLICY IF EXISTS "profiles_insert_admin"    ON public.profiles;
+DROP POLICY IF EXISTS "profiles_insert_self_emp" ON public.profiles;
 
 CREATE POLICY "profiles_insert_admin"
     ON public.profiles FOR INSERT
     WITH CHECK (public.get_my_role() = 'admin');
 
-CREATE POLICY "profiles_insert_self_emp"
-    ON public.profiles FOR INSERT
-    WITH CHECK (
-        id   = auth.uid()
-        AND  role = 'employee'   -- employees cannot self-promote to admin
-    );
+-- NOTE: profiles_insert_self_emp was removed intentionally.
+-- Previously it allowed any authenticated employee to insert a
+-- profile row for themselves with role = 'employee'.  That is
+-- now handled exclusively by claim_employee_account() (SECURITY
+-- DEFINER), which verifies the invite token before inserting.
+-- Direct INSERT by employees is no longer permitted.
 
--- ── UPDATE ──────────────────────────────────────────────────
+-- ── UPDATE ───────────────────────────────────────────────────
 -- Only admins may update profile rows.
--- This prevents employees from changing their own role.
+-- Employees cannot change their own role.
 DROP POLICY IF EXISTS "profiles_update_admin" ON public.profiles;
 CREATE POLICY "profiles_update_admin"
     ON public.profiles FOR UPDATE
     USING  (public.get_my_role() = 'admin')
     WITH CHECK (public.get_my_role() = 'admin');
 
--- ── DELETE ──────────────────────────────────────────────────
--- Profile rows are deleted automatically when the Auth user is
--- deleted (ON DELETE CASCADE defined above).  No explicit RLS
--- delete policy is needed for normal operation.
--- Admins may explicitly delete a profile row if required.
+-- ── DELETE ───────────────────────────────────────────────────
+-- Profile rows are cascade-deleted when the Auth user is deleted.
+-- Admins can also delete profile rows explicitly.
 DROP POLICY IF EXISTS "profiles_delete_admin" ON public.profiles;
 CREATE POLICY "profiles_delete_admin"
     ON public.profiles FOR DELETE
@@ -138,20 +148,19 @@ CREATE POLICY "profiles_delete_admin"
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.employees (
-    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    auth_user_id  UUID         UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
-    employee_id   TEXT         NOT NULL UNIQUE,
-    name          TEXT         NOT NULL,
-    email         TEXT         NOT NULL UNIQUE,
-    department    TEXT         NOT NULL,
-    designation   TEXT         NOT NULL,
+    id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    auth_user_id  UUID          UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
+    employee_id   TEXT          NOT NULL UNIQUE,
+    name          TEXT          NOT NULL,
+    email         TEXT          NOT NULL UNIQUE,
+    department    TEXT          NOT NULL,
+    designation   TEXT          NOT NULL,
     salary        NUMERIC(12,2) NOT NULL CHECK (salary >= 0),
-    is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
--- ── Timestamp helper ─────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -164,13 +173,11 @@ CREATE TRIGGER employees_updated_at
     BEFORE UPDATE ON public.employees
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- ── Indexes ──────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_employees_employee_id
     ON public.employees(employee_id);
 CREATE INDEX IF NOT EXISTS idx_employees_auth_user_id
     ON public.employees(auth_user_id);
 
--- ── RLS ──────────────────────────────────────────────────────
 ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
 
 -- Admins: full access
@@ -186,24 +193,18 @@ CREATE POLICY "employees_select_own"
     ON public.employees FOR SELECT
     USING (auth_user_id = auth.uid());
 
--- Employees: update their OWN row but ONLY the auth_user_id column.
--- This is used during the invite-claim flow when an employee links
--- their new Auth account to the pre-existing employee record.
--- They cannot change salary, department, designation, or employee_id.
-DROP POLICY IF EXISTS "employees_update_claim" ON public.employees;
-CREATE POLICY "employees_update_claim"
-    ON public.employees FOR UPDATE
-    USING (
-        -- The row must currently be unclaimed (auth_user_id IS NULL)
-        -- and the claim must be made by the current authenticated user.
-        auth_user_id IS NULL
-        AND public.get_my_role() = 'employee'
-    )
-    WITH CHECK (
-        -- After the update, the row must point to the current user.
-        auth_user_id = auth.uid()
-        AND public.get_my_role() = 'employee'
-    );
+-- NOTE: employees_update_claim was removed intentionally.
+--
+-- The previous version had an RLS UPDATE policy that allowed any
+-- authenticated employee to update any employees row where
+-- auth_user_id IS NULL.  This meant any employee could claim any
+-- unclaimed account directly via the REST API, bypassing the
+-- invite-token check entirely.
+--
+-- All claiming is now handled exclusively through
+-- claim_employee_account() (SECURITY DEFINER), which runs token
+-- verification before touching any row.  No RLS UPDATE policy
+-- for employees is needed or safe.
 
 
 -- ============================================================
@@ -236,7 +237,8 @@ CREATE POLICY "attendance_all_admin"
     USING     (public.get_my_role() = 'admin')
     WITH CHECK (public.get_my_role() = 'admin');
 
--- Employees: read their own records only
+-- Employees: read their own records only.
+-- No INSERT / UPDATE / DELETE for employees.
 DROP POLICY IF EXISTS "attendance_select_own" ON public.attendance;
 CREATE POLICY "attendance_select_own"
     ON public.attendance FOR SELECT
@@ -245,9 +247,6 @@ CREATE POLICY "attendance_select_own"
             SELECT id FROM public.employees WHERE auth_user_id = auth.uid()
         )
     );
-
--- Employees cannot INSERT, UPDATE, or DELETE attendance.
--- Only admins can mark attendance (enforced by the admin-only INSERT above).
 
 
 -- ============================================================
@@ -280,7 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_status
 
 ALTER TABLE public.leave_requests ENABLE ROW LEVEL SECURITY;
 
--- Admins: full access (approve / reject / delete)
+-- Admins: full access
 DROP POLICY IF EXISTS "leave_all_admin" ON public.leave_requests;
 CREATE POLICY "leave_all_admin"
     ON public.leave_requests FOR ALL
@@ -297,10 +296,9 @@ CREATE POLICY "leave_select_own"
         )
     );
 
--- Employees: submit new requests only.
--- Enforced constraints:
---   1. employee_id_fk must map to the requesting user's own employee row.
---   2. status must be 'Pending' on insert — employees cannot self-approve.
+-- Employees: submit new requests.
+-- employee_id_fk must map to the caller's own employee row.
+-- status must be 'Pending' on insert — employees cannot self-approve.
 DROP POLICY IF EXISTS "leave_insert_own" ON public.leave_requests;
 CREATE POLICY "leave_insert_own"
     ON public.leave_requests FOR INSERT
@@ -311,44 +309,49 @@ CREATE POLICY "leave_insert_own"
         AND status = 'Pending'
     );
 
--- Employees: NO UPDATE or DELETE policy.
--- Employees cannot change their request once submitted,
--- and cannot change the status to Approved/Rejected themselves.
--- This is intentional and enforced at the database level.
+-- No UPDATE or DELETE for employees — enforced by absence of policy.
 
 
 -- ============================================================
 -- SECTION 6 — GRANTS
---   The anon key is used on the frontend for unauthenticated
---   requests (e.g. the initial session check on login.html).
---   The authenticated role covers all logged-in users; RLS
---   policies above control what each user can actually see.
 -- ============================================================
 
-GRANT USAGE  ON SCHEMA public TO anon, authenticated;
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles       TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.employees      TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.attendance     TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.leave_requests TO authenticated;
 
--- Read-only for anon (needed for the Supabase JS client to initialise)
+-- anon needs SELECT on profiles only for the Supabase JS client
+-- session initialisation check on login.html.
 GRANT SELECT ON public.profiles TO anon;
 
 
 -- ============================================================
 -- SECTION 7 — NEW USER TRIGGER
 --
---   This trigger fires after EVERY new row in auth.users,
---   including the admin account you create manually.
+--   Fires after every new row in auth.users.
 --
---   It inserts a profile row with role = 'employee' as the
---   safe default.  The admin account creation step below
---   uses ON CONFLICT ... DO UPDATE to OVERRIDE this default
---   and set role = 'admin'.
+--   IMPORTANT CHANGE FROM V2:
+--   The trigger now checks whether a placeholder profile row
+--   already exists for the signing-up user's email address.
+--   If one does, it means admin pre-created this employee and
+--   claim_employee_account() will handle linking — so the
+--   trigger does nothing for this user.
+--   If no placeholder exists, the trigger inserts the default
+--   'employee' profile row (covers the admin account case and
+--   any other new-user scenario).
 --
---   The trigger is SECURITY DEFINER so it runs as the postgres
---   role and is not blocked by the RLS policies on profiles.
+--   WHY THIS MATTERS:
+--   In V2 the trigger unconditionally inserted a new profile
+--   row with id = NEW.id (the real auth UUID).  But admin had
+--   already inserted a placeholder row with a different UUID.
+--   That left two profile rows for the same employee.  Then
+--   claim_employee_account() tried to UPDATE the placeholder
+--   row's primary key to the real UUID, which fails with a
+--   unique-constraint violation because the real-UUID row
+--   already existed.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -357,16 +360,38 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+    v_placeholder_exists BOOLEAN;
 BEGIN
     /*
-     * Always insert with role = 'employee' as a safe default.
-     * For the admin account, the manual INSERT below uses
-     * ON CONFLICT (id) DO UPDATE SET role = 'admin'
-     * to promote the row after this trigger has run.
-     *
-     * ON CONFLICT DO NOTHING is intentionally NOT used here
-     * so that a re-run of the function on the same UUID still
-     * produces a row (idempotent insert).
+     * Check whether a placeholder profile row already exists for
+     * the email address that just signed up.  A placeholder row
+     * is one whose employee_id matches an employees row with the
+     * same email AND whose invite_token is not NULL.
+     */
+    SELECT EXISTS (
+        SELECT 1
+        FROM   public.profiles pr
+        JOIN   public.employees em ON em.employee_id = pr.employee_id
+        WHERE  lower(em.email) = lower(NEW.email)
+          AND  pr.invite_token IS NOT NULL
+    )
+    INTO v_placeholder_exists;
+
+    IF v_placeholder_exists THEN
+        /*
+         * A placeholder exists.  claim_employee_account() will
+         * handle deleting it and inserting the real row.
+         * Do nothing here to avoid creating a duplicate.
+         */
+        RETURN NEW;
+    END IF;
+
+    /*
+     * No placeholder — this is either the admin account or an
+     * unrelated new user.  Insert the default 'employee' profile.
+     * For the admin, the manual SQL in Step C below will promote
+     * this row to 'admin' using ON CONFLICT (id) DO UPDATE.
      */
     INSERT INTO public.profiles (id, role)
     VALUES (NEW.id, 'employee')
@@ -376,40 +401,67 @@ BEGIN
 END;
 $$;
 
--- Recreate the trigger (DROP was at the top of this file)
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
 -- ============================================================
--- SECTION 8 — EMPLOYEE INVITE-CLAIM HELPER FUNCTION
+-- SECTION 8 — EMPLOYEE ACCOUNT CLAIM FUNCTION
 --
---   Because the admin cannot safely call auth.signUp() from
---   the browser without losing their own session, employees
---   claim their accounts themselves using an invite token.
+--   WHAT IT DOES:
+--   Converts a placeholder profile + unclaimed employee row
+--   into a fully linked, active account.
 --
---   Flow:
---   1. Admin creates an employee record (no Auth user yet).
---      The system generates a random invite_token and stores
---      it in the profiles table linked to the employee record.
---   2. Admin gives the employee their Employee ID and invite token.
---   3. Employee opens the "First Login" page, enters their
---      Employee ID, invite token, and sets a new password.
---   4. The frontend calls auth.signUp() as the employee.
---   5. After signup the frontend calls this RPC to link the
---      new auth.users row to the existing employee record and
---      mark the token as consumed.
+--   SECURITY PROPERTIES (v3):
 --
---   This function runs SECURITY DEFINER so it can write to
---   both employees and profiles without the new employee
---   having admin privileges.
+--   1. Does NOT accept a caller-supplied auth user ID.
+--      Uses auth.uid() exclusively — the value Supabase injects
+--      from the verified JWT.  A caller cannot impersonate
+--      another user by supplying a different UUID.
+--
+--   2. Only callable by authenticated users (GRANT to
+--      authenticated only — anon removed).
+--
+--   3. Verifies that auth.users.email (for the caller's JWT)
+--      matches employees.email for the requested employee_id.
+--      An employee cannot claim a record belonging to a
+--      different email address even if they know the token.
+--
+--   4. Verifies the employee_id exists and is unclaimed
+--      (auth_user_id IS NULL).
+--
+--   5. Verifies the invite_token is correct and non-NULL.
+--
+--   6. Uses SELECT ... FOR UPDATE on the employees row to
+--      acquire a row-level lock before any writes.  This
+--      prevents a race condition where two concurrent requests
+--      with the same token both pass the checks and both
+--      succeed.  Only the first to acquire the lock proceeds;
+--      the second will see auth_user_id IS NOT NULL and fail.
+--
+--   7. Deletes the placeholder profile row and inserts a new
+--      one with id = auth.uid().  Avoids a primary-key UPDATE
+--      which can cause constraint violations.
+--
+--   8. All writes happen in the same transaction.  If any step
+--      fails, the entire transaction rolls back — no partial
+--      state is committed.
+--
+--   9. The caller cannot promote themselves to admin.  The new
+--      profile row is always inserted with role = 'employee'.
+--
+--   10. Protected employee fields (salary, department,
+--       designation, employee_id) are never written by this
+--       function.  Only auth_user_id is updated.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.claim_employee_account(
     p_employee_id  TEXT,
-    p_invite_token TEXT,
-    p_auth_user_id UUID
+    p_invite_token TEXT
+    -- p_auth_user_id removed: we use auth.uid() directly.
+    -- Accepting it from the caller was a security vulnerability
+    -- because it could be forged in an API request.
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -417,127 +469,199 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-    v_employee_row  public.employees%ROWTYPE;
-    v_profile_row   public.profiles%ROWTYPE;
+    v_caller_id    UUID;
+    v_caller_email TEXT;
+    v_employee_row public.employees%ROWTYPE;
+    v_placeholder_id UUID;
 BEGIN
-    -- 1. Find the employee row by employee_id
-    SELECT * INTO v_employee_row
-    FROM public.employees
-    WHERE employee_id = p_employee_id
-    LIMIT 1;
+    -- ── 0. Identify the caller from the JWT ──────────────────
+    v_caller_id := auth.uid();
+
+    IF v_caller_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'error', 'You must be signed in to claim an account.'
+        );
+    END IF;
+
+    -- ── 1. Get the caller's verified email from auth.users ───
+    --   auth.users is in the auth schema; SECURITY DEFINER lets
+    --   us read it here.
+    SELECT lower(email)
+    INTO   v_caller_email
+    FROM   auth.users
+    WHERE  id = v_caller_id;
+
+    IF v_caller_email IS NULL THEN
+        RETURN jsonb_build_object(
+            'error', 'Could not verify your identity. Please sign in again.'
+        );
+    END IF;
+
+    -- ── 2. Find and lock the employee row ────────────────────
+    --   FOR UPDATE acquires a row-level lock.  If two concurrent
+    --   calls arrive simultaneously, the second will wait here
+    --   until the first transaction completes (commits or rolls
+    --   back).  This makes the claim atomic.
+    SELECT *
+    INTO   v_employee_row
+    FROM   public.employees
+    WHERE  employee_id = p_employee_id
+    FOR UPDATE;             -- row-level lock
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('error', 'Employee ID not found.');
     END IF;
 
-    -- 2. Verify the employee is not already claimed
+    -- ── 3. Check the account is not already claimed ──────────
     IF v_employee_row.auth_user_id IS NOT NULL THEN
-        RETURN jsonb_build_object('error', 'This account has already been claimed.');
+        RETURN jsonb_build_object(
+            'error', 'This account has already been claimed. '
+                  || 'Please sign in on the login page.'
+        );
     END IF;
 
-    -- 3. Find the profiles row by employee_id and verify the invite token
-    SELECT * INTO v_profile_row
-    FROM public.profiles
-    WHERE employee_id = p_employee_id
-    LIMIT 1;
-
-    IF NOT FOUND OR v_profile_row.invite_token IS NULL THEN
-        RETURN jsonb_build_object('error', 'No pending invitation found for this Employee ID.');
+    -- ── 4. Verify the caller's email matches the employee record
+    --   This is the critical anti-impersonation check.
+    --   Even if someone knows another employee's token, they
+    --   cannot use it because their JWT email will not match.
+    IF lower(v_employee_row.email) != v_caller_email THEN
+        RETURN jsonb_build_object(
+            'error', 'The email address for your account does not match '
+                  || 'the email associated with this Employee ID.'
+        );
     END IF;
 
-    IF v_profile_row.invite_token != p_invite_token THEN
+    -- ── 5. Find the placeholder profile row ──────────────────
+    SELECT id
+    INTO   v_placeholder_id
+    FROM   public.profiles
+    WHERE  employee_id   = p_employee_id
+      AND  invite_token  IS NOT NULL;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'error', 'No pending invitation found for this Employee ID.'
+        );
+    END IF;
+
+    -- ── 6. Verify the invite token ───────────────────────────
+    --   Use a separate query so the token value is never returned
+    --   to the caller in an error message.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM   public.profiles
+        WHERE  id           = v_placeholder_id
+          AND  invite_token = p_invite_token
+    ) THEN
         RETURN jsonb_build_object('error', 'Invalid invite token.');
     END IF;
 
-    -- 4. Link the Auth user to the employee record
-    UPDATE public.employees
-    SET auth_user_id = p_auth_user_id
-    WHERE id = v_employee_row.id;
+    -- ── 7. Delete the placeholder profile row ────────────────
+    --   We delete rather than UPDATE the primary key because
+    --   updating a PK to a value that already exists (inserted
+    --   by handle_new_user for non-placeholder cases) would
+    --   cause a unique-constraint violation.
+    DELETE FROM public.profiles
+    WHERE  id = v_placeholder_id;
 
-    -- 5. Link the profile row to the Auth user and consume the token
-    UPDATE public.profiles
-    SET id           = p_auth_user_id,
-        invite_token = NULL           -- token is single-use
-    WHERE employee_id = p_employee_id;
+    -- ── 8. Insert the real profile row ───────────────────────
+    --   role is always 'employee' — the caller cannot promote
+    --   themselves to admin through this function.
+    --   invite_token is NULL — token is single-use and consumed.
+    INSERT INTO public.profiles (id, role, employee_id, invite_token)
+    VALUES (v_caller_id, 'employee', p_employee_id, NULL);
+
+    -- ── 9. Link the employee record to the Auth user ─────────
+    UPDATE public.employees
+    SET    auth_user_id = v_caller_id
+    WHERE  id           = v_employee_row.id;
+
+    -- ── 10. Verify the link was written ──────────────────────
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Failed to link employee record.';
+    END IF;
 
     RETURN jsonb_build_object('success', true);
 
 EXCEPTION WHEN OTHERS THEN
+    -- Any unhandled error rolls back all writes automatically.
     RETURN jsonb_build_object('error', SQLERRM);
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.claim_employee_account(TEXT, TEXT, UUID) FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION public.claim_employee_account(TEXT, TEXT, UUID) TO authenticated, anon;
+-- Only authenticated users may call this function.
+-- anon users cannot claim accounts.
+REVOKE EXECUTE ON FUNCTION public.claim_employee_account(TEXT, TEXT) FROM PUBLIC;
+GRANT  EXECUTE ON FUNCTION public.claim_employee_account(TEXT, TEXT) TO authenticated;
 
 
 -- ============================================================
 -- SECTION 9 — CREATE THE FIRST ADMIN ACCOUNT
 --
---   Run these steps AFTER the schema above has been applied.
---   Steps A and B are done in the Supabase Dashboard UI.
---   Step C is a SQL command you run in the SQL Editor.
+--   ALL steps below are performed AFTER running the schema.
 -- ============================================================
 
 /*
 ──────────────────────────────────────────────────────────────
-STEP A — Disable email confirmation (do this once, in the UI)
+STEP A — Disable email confirmation  (UI, do this first)
 ──────────────────────────────────────────────────────────────
   Supabase Dashboard → Authentication → Settings
   → Turn OFF "Enable email confirmations"
   → Save
 
-  Without this, newly created users (including admin) must
-  click a confirmation email before they can log in.
-  For a college demo, turn this off.
-
 ──────────────────────────────────────────────────────────────
-STEP B — Create the admin Auth user (in the UI)
+STEP B — Create the admin Auth user  (UI)
 ──────────────────────────────────────────────────────────────
-  Supabase Dashboard → Authentication → Users → Add user
-    Email:    admin@pms.local      (or any email you choose)
-    Password: (a strong password — write it down)
+  Authentication → Users → Add user
+  Email:    admin@pms.local  (or any email you prefer)
+  Password: (strong password — write it down)
   Click "Create user".
 
-  The handle_new_user() trigger will fire automatically and
-  insert a profiles row with role = 'employee'.
+  The handle_new_user() trigger fires and inserts:
+      profiles row: id = <admin UUID>, role = 'employee'
 
 ──────────────────────────────────────────────────────────────
-STEP C — Promote the admin profile (run in SQL Editor)
+STEP C — Promote to admin  (SQL Editor)
 ──────────────────────────────────────────────────────────────
+  Copy the UUID from Authentication → Users, then run:
 
-  IMPORTANT: Use ON CONFLICT ... DO UPDATE, not DO NOTHING.
+      INSERT INTO public.profiles (id, role)
+      VALUES ('<admin-uuid>', 'admin')
+      ON CONFLICT (id) DO UPDATE SET role = 'admin';
+
+  CRITICAL: Use DO UPDATE SET role = 'admin', not DO NOTHING.
   The trigger already inserted role = 'employee'.
-  DO NOTHING would silently keep it as 'employee'.
-  DO UPDATE SET role = 'admin' correctly overrides it.
+  DO NOTHING would silently keep that value and the admin
+  could never reach the admin dashboard.
 
-  Replace <paste-uuid-here> with the UUID from the Users list.
-
-    INSERT INTO public.profiles (id, role)
-    VALUES ('<paste-uuid-here>', 'admin')
-    ON CONFLICT (id) DO UPDATE SET role = 'admin';
-
-  Verify it worked:
-
-    SELECT id, role FROM public.profiles WHERE role = 'admin';
-
-  You should see exactly one row.
+  Verify:
+      SELECT id, role FROM public.profiles WHERE role = 'admin';
+  Expected: exactly one row.
 
 ──────────────────────────────────────────────────────────────
 STEP D — Test admin login
 ──────────────────────────────────────────────────────────────
-  Open login.html in your browser and sign in with the admin
-  email and password.  You should reach the admin dashboard.
+  Open login.html, sign in with the admin credentials.
+  You should reach the admin dashboard.
 
 ──────────────────────────────────────────────────────────────
-STEP E — Create employee accounts (via the app)
+STEP E — Add employees (via the app)
 ──────────────────────────────────────────────────────────────
-  While logged in as admin, use the "Add Employee" form.
-  The system will generate an invite token for each employee.
-  Give the employee their Employee ID and invite token.
-  The employee uses the "First Login" page to set their password.
+  Log in as admin → Add Employee form.
+  Fill in all fields.  No password field — employees set their
+  own password via register.html using the invite token.
+  The admin sees the token in the confirmation popup.
 
-  See SETUP.md for the full step-by-step.
+──────────────────────────────────────────────────────────────
+STEP F — Employee activates account (register.html)
+──────────────────────────────────────────────────────────────
+  Employee opens register.html and enters:
+    - Their Employee ID
+    - Their work email (exactly as admin entered it)
+    - The invite token from the admin
+    - A new password (and confirmation)
+
+  On success the employee is redirected to login.html.
 */
 
 -- ============================================================
