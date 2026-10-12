@@ -332,18 +332,17 @@ function renderEmployeeTable(data) {
 
 /**
  * Show the admin the invite token so they can pass it to the employee.
- * In a real deployment this would be sent via email.
+ * Queries employees.invite_token — the token now lives there, not in profiles.
  */
 async function showInviteDetails(emp) {
-    /* Fetch the invite_token from profiles for this employee_id */
-    const { data: profile, error } = await db
-        .from("profiles")
+    const { data: row, error } = await db
+        .from("employees")
         .select("invite_token")
         .eq("employee_id", emp.employee_id)
         .single();
 
-    if (error || !profile?.invite_token) {
-        showToast("Could not retrieve invite token.", "error");
+    if (error || !row?.invite_token) {
+        showToast("Invite token not available (account may already be active).", "error");
         return;
     }
 
@@ -352,7 +351,7 @@ async function showInviteDetails(emp) {
         `Tell the employee to open register.html and enter:\n\n` +
         `  Employee ID   : ${emp.employee_id}\n` +
         `  Email         : ${emp.email}\n` +
-        `  Invite Token  : ${profile.invite_token}\n\n` +
+        `  Invite Token  : ${row.invite_token}\n\n` +
         `They will set their own password on that page.`
     );
 }
@@ -417,12 +416,23 @@ function wireAddEmployeeForm() {
              * This is the standard invite flow used in production apps.
              */
 
-            /* Generate a random 8-character invite token */
+            /*
+             * Generate a random 12-hex-character invite token.
+             * Stored in employees.invite_token (NOT in profiles).
+             *
+             * Why not profiles?
+             * profiles.id is a FK → auth.users(id).  A placeholder
+             * UUID with no matching auth.users row would immediately
+             * fail with a foreign-key violation.  employees has no
+             * such constraint on its own PK, so the token lives here
+             * safely until the employee claims their account.
+             */
             const inviteToken = Array.from(
                 crypto.getRandomValues(new Uint8Array(6))
             ).map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 
-            /* Step 1: Insert the employee record (no auth_user_id yet) */
+            /* Insert the employee record with the token.
+               auth_user_id is NULL until the employee activates. */
             const { error: empErr } = await db.from("employees").insert({
                 auth_user_id: null,
                 employee_id:  empId,
@@ -430,7 +440,8 @@ function wireAddEmployeeForm() {
                 email,
                 department,
                 designation,
-                salary
+                salary,
+                invite_token: inviteToken
             });
 
             if (empErr) {
@@ -453,30 +464,6 @@ function wireAddEmployeeForm() {
                 return;
             }
 
-            /* Step 2: Insert a profiles row with the invite token.
-               The profile's id is a placeholder UUID (gen_random_uuid)
-               that will be replaced by the real auth.users UUID when the
-               employee claims their account via register.html.            */
-            const placeholderUUID = crypto.randomUUID();
-
-            const { error: profErr } = await db.from("profiles").insert({
-                id:           placeholderUUID,
-                role:         "employee",
-                employee_id:  empId,
-                invite_token: inviteToken
-            });
-
-            if (profErr) {
-                /* Roll back the employee row so we don't leave an orphan */
-                await db.from("employees")
-                        .delete()
-                        .eq("employee_id", empId);
-
-                setFieldError("addEmployeeMessage",
-                    "Could not create invite: " + profErr.message);
-                return;
-            }
-
             form.reset();
             clearFieldError("addEmployeeMessage");
 
@@ -488,7 +475,7 @@ function wireAddEmployeeForm() {
                 `  Employee ID   : ${empId}\n` +
                 `  Email         : ${email}\n` +
                 `  Invite Token  : ${inviteToken}\n\n` +
-                `The employee must open register.html and use these\n` +
+                `The employee opens register.html and uses these\n` +
                 `details to set their password and activate their account.\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
             );
