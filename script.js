@@ -371,7 +371,7 @@ function wireAddEmployeeForm() {
         e.preventDefault();
         clearFieldError("addEmployeeMessage");
 
-        const empId       = document.getElementById("empId").value.trim();
+        const empId       = document.getElementById("empId").value.trim().toUpperCase();
         const name        = document.getElementById("empName").value.trim();
         const email       = document.getElementById("empEmail").value.trim().toLowerCase();
         const department  = document.getElementById("empDepartment").value;
